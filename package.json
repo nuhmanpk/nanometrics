@@ -25,7 +25,11 @@
         }
       ]
     },
-    "commands": []
+    "commands": [],
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/nuhmanpk/nanometrics.git"
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

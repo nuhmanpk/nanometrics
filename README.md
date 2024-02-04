@@ -1,10 +1,10 @@
 # Nano Metrics - VSCode Extension
 
-![Nano Metrics Logo](images/logo-full.png)
+![Nano Metrics Logo](./images/logo-full.png)
 
 Explore and monitor system metrics effortlessly with this quick and convenient VSCode extension. Access real-time information on CPU load, memory usage, core load, and running instances of various services right from the side panel. Stay informed about your system's health and performance with ease.
 
-![Nano Metrics Demo](images/demo.gif)
+![Nano Metrics Demo](./images/demo.gif)
 
 ## Features
 

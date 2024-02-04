@@ -48,6 +48,7 @@
   },
   "dependencies": {
     "chart.js": "^4.4.1",
-    "sys-metrics-tracker": "^0.0.4"
+    "sys-metrics-tracker": "^0.0.4",
+    "vsce": "^2.15.0"
   }
 }

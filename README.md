@@ -6,6 +6,10 @@ Explore and monitor system metrics effortlessly with this quick and convenient V
 
 ![Nano Metrics Demo](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/demo.gif)
 
+
+  [![Version](https://img.shields.io/visual-studio-marketplace/v/nuhmanpk.nanometrics.svg)](https://marketplace.visualstudio.com/items?itemName=nuhmanpk.nanometrics)
+  [![Downloads](https://img.shields.io/visual-studio-marketplace/d/nuhmanpk.nanometrics.svg)](https://marketplace.visualstudio.com/items?itemName=nuhmanpk.nanometrics)
+
 ## Features
 
 - Real-time CPU Load

@@ -72,9 +72,10 @@ async function getWebviewContent(extensionUri: vscode.Uri): Promise<string> {
 
     // Main HTML and script as a single string
     return [
-        '<div id="cpuChart" width="400" height="50"></div>',
-        '<div id="memoryChart" width="400" height="50"></div>',
-        '<div id="coreLoadChart" width="400" height="50"></div>',
+        '<div id="loadingSpinner" style="display:flex;align-items:center;justify-content:center;height:100px;"><span>Loading metrics...</span><span style="margin-left:10px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#36a2eb" stroke-width="4" stroke-linecap="round" stroke-dasharray="60" stroke-dashoffset="0"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/></circle></svg></span></div>',
+        '<div id="cpuChart" width="400" height="50" style="display:none;"></div>',
+        '<div id="memoryChart" width="400" height="50" style="display:none;"></div>',
+        '<div id="coreLoadChart" width="400" height="50" style="display:none;"></div>',
         '<div id="graphContainer" style="display:none; margin-top:20px;"><canvas id="usageGraph" width="400" height="200"></canvas></div>',
         '<hr>',
         '<div><strong>Optional Services:</strong></div>',
@@ -82,6 +83,15 @@ async function getWebviewContent(extensionUri: vscode.Uri): Promise<string> {
         '<div id="servicesData"></div>',
         '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>',
         `<script>
+            // Hide loading spinner and show metrics after load
+            window.addEventListener('DOMContentLoaded', function() {
+                setTimeout(function() {
+                    document.getElementById('loadingSpinner').style.display = 'none';
+                    document.getElementById('cpuChart').style.display = 'block';
+                    document.getElementById('memoryChart').style.display = 'block';
+                    document.getElementById('coreLoadChart').style.display = 'block';
+                }, 800);
+            });
             const cpuData = ${JSON.stringify(cpuData)};
             const memoryData = ${JSON.stringify(memoryData)};
             const coreLoadData = ${JSON.stringify(coreLoadData)};

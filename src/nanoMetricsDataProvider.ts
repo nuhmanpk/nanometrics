@@ -45,49 +45,50 @@ class MetricTreeDataProvider implements vscode.TreeDataProvider<MetricNode> {
                 getMysqlServices()
             ]);
 
-            // Helper to colorize values
-            const colorize = (value: number) => {
-                if (value >= 80) { return '$(errorForeground)'; } // red
-                if (value >= 50) { return '$(warningForeground)'; } // yellow
-                return '';
-            };
-
             // CPU
-            const cpuColor = colorize(cpuData);
             const cpuLabel = `💻 CPU : ${Math.round(cpuData)}%`;
-            const cpuNode = new MetricNode(cpuLabel, vscode.TreeItemCollapsibleState.None, cpuColor ? `$(primitive-square) ${cpuColor}` : '');
+            const cpuNode = new MetricNode(cpuLabel, vscode.TreeItemCollapsibleState.None);
 
             // Memory
-            const memColor = colorize(memoryData);
             const memLabel = `🧠 Memory : ${Math.round(memoryData)}%`;
-            const memNode = new MetricNode(memLabel, vscode.TreeItemCollapsibleState.None, memColor ? `$(primitive-square) ${memColor}` : '');
+            const memNode = new MetricNode(memLabel, vscode.TreeItemCollapsibleState.None);
 
-            // Core Loads
-            const coreLoadsRounded = coreLoadData.map((load: number) => Math.round(load));
-            const coreLoadLabel = `🔥 Core Loads : ${coreLoadsRounded.join(', ')}`;
-            const coreLoadNode = new MetricNode(coreLoadLabel, vscode.TreeItemCollapsibleState.None);
+            // GPU
+            let gpuLabel = '🖥️ GPU : N/A';
+            try {
+                const sysinfoMetrics = require('./sysinfoMetrics');
+                const gpuInfo = await sysinfoMetrics.getGpuInfo();
+                if (gpuInfo && gpuInfo.controllers && gpuInfo.controllers.length > 0) {
+                    gpuLabel = `🖥️ GPU : ${gpuInfo.controllers[0].model} (${gpuInfo.controllers[0].memoryTotal || 'N/A'} MB)`;
+                }
+            } catch {}
+            const gpuNode = new MetricNode(gpuLabel, vscode.TreeItemCollapsibleState.None);
 
-            const serviceNodes: MetricNode[] = [cpuNode, memNode, coreLoadNode];
+            // Network
+            let netLabel = '🌐 Network : N/A';
+            try {
+                const sysinfoMetrics = require('./sysinfoMetrics');
+                const netInfo = await sysinfoMetrics.getNetworkInfo();
+                if (netInfo && netInfo.length > 0) {
+                    netLabel = `🌐 Network : ${netInfo[0].iface} (${netInfo[0].ip4 || 'N/A'})`;
+                }
+            } catch {}
+            const netNode = new MetricNode(netLabel, vscode.TreeItemCollapsibleState.None);
 
-            // Function to create MetricNode for running instances of a service
+            const serviceNodes: MetricNode[] = [cpuNode, memNode, gpuNode, netNode];
+
+            // Function to create MetricNode for running instances of a service (not used for default)
             const createRunningNodes = (serviceName: string, instances: any[]) => {
                 const runningInstances = instances.filter((instance: any) => instance.running);
                 return runningInstances.map((instance: any, index: number) => {
                     const cpu = Math.round(instance?.cpu ?? 0);
                     const mem = Math.round(instance?.mem ?? 0);
-                    let color = '';
-                    if (cpu >= 80 || mem >= 80) { color = '$(errorForeground)'; }
-                    else if (cpu >= 50 || mem >= 50) { color = '$(warningForeground)'; }
-                    const emoji = color === '$(errorForeground)' ? '🚨' : color === '$(warningForeground)' ? '⚠️' : '';
-                    const label = `${serviceName} - ${index + 1}: ${emoji} 💻 : ${cpu}%, 🧠: ${mem}%`;
-                    return new MetricNode(label, vscode.TreeItemCollapsibleState.None, color ? `$(primitive-square) ${color}` : '');
+                    const label = `${serviceName} - ${index + 1}: 💻 : ${cpu}%, 🧠: ${mem}%`;
+                    return new MetricNode(label, vscode.TreeItemCollapsibleState.None);
                 });
             };
 
-            // Add nodes for running instances of each service
-            if (mysqlData.length > 0) {
-                serviceNodes.push(...createRunningNodes('🐬 MySQL', mysqlData));
-            }
+            // ...existing code...
 
             return serviceNodes;
         }

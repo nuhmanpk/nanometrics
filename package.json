@@ -31,7 +31,93 @@
         }
       ]
     },
-    "commands": []
+    "commands": [],
+    "configuration": {
+      "type": "object",
+      "title": "Nano Metrics Settings",
+      "properties": {
+        "nanometrics.showGraph": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show CPU and Memory usage graph in the Nano Metrics panel."
+        },
+        "nanometrics.enableMysql": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable MySQL metrics."
+        },
+        "nanometrics.enableMongoDB": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable MongoDB metrics."
+        },
+        "nanometrics.enableRedis": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Redis metrics."
+        },
+        "nanometrics.enableDocker": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Docker metrics."
+        },
+        "nanometrics.enableNginx": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Nginx metrics."
+        },
+        "nanometrics.enableApache": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Apache metrics."
+        },
+        "nanometrics.enableElasticsearch": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Elasticsearch metrics."
+        },
+        "nanometrics.enableRabbitMQ": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable RabbitMQ metrics."
+        },
+        "nanometrics.enableKafka": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Kafka metrics."
+        },
+        "nanometrics.enablePostgres": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Postgres metrics."
+        },
+        "nanometrics.enableOracleDB": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable OracleDB metrics."
+        },
+        "nanometrics.enableSqlServer": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable SQL Server metrics."
+        },
+        "nanometrics.enableGpu": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable GPU metrics."
+        },
+        "nanometrics.enableBattery": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Battery metrics."
+        },
+        "nanometrics.enableNetwork": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Network metrics."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

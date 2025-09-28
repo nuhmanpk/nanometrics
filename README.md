@@ -16,24 +16,10 @@ Explore and monitor system metrics effortlessly with this quick and convenient V
 - Real-time CPU Load
 - Live Memory Usage
 - Core Load Monitoring
-- Optional Service Monitoring (enable via checkboxes):
-  - MySQL
-  - MongoDB
-  - Redis
-  - Docker
-  - Nginx
-  - Apache
-  - Elasticsearch
-  - RabbitMQ
-  - Kafka
-  - Postgres
-  - OracleDB
-  - SQL Server
-  - GPU
-  - Battery
-  - Network
-- Interactive Graphs (enable via 'Show Graph' checkbox):
-  - Bar chart for CPU and Memory usage
+ - Optional Service Monitoring (configure via VS Code settings):
+   - MySQL, MongoDB, Redis, Docker, Nginx, Apache, Elasticsearch, RabbitMQ, Kafka, Postgres, OracleDB, SQL Server, GPU, Battery, Network
+ - Interactive Graphs (enable via VS Code settings):
+   - Bar chart for CPU and Memory usage
 
 ## Installation
 
@@ -47,8 +33,8 @@ Explore and monitor system metrics effortlessly with this quick and convenient V
 
 1. Open the Nano Metrics side panel
 2. Always see real-time CPU, memory, and core load metrics
-3. Use checkboxes to enable/disable monitoring of additional services (MySQL, MongoDB, Redis, Docker, GPU, Battery, Network, etc.)
-4. Enable the 'Show Graph' checkbox to display a bar chart of CPU and memory usage
+3. Configure which services and features to enable by searching for "Nano Metrics" in VS Code settings
+4. Enable the "Show Graph" setting to display a bar chart of CPU and memory usage
 5. Stay informed about your system's health and performance
 
 

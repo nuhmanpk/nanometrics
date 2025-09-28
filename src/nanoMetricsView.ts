@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { calculateCurrentCpuLoad, calculateCurrentMemoryLoad, calculateTotalCoreLoad, getMysqlServices } from 'sys-metrics-tracker';
+import { calculateCurrentCpuLoad, calculateCurrentMemoryLoad, calculateTotalCoreLoad, getMysqlServices } from './sysinfoMetrics';
 
 export class NanoMetricsView {
     private static _panel: vscode.WebviewPanel | undefined;
@@ -42,57 +42,103 @@ export class NanoMetricsView {
 
 async function getWebviewContent(extensionUri: vscode.Uri): Promise<string> {
 
-    const [cpuData, memoryData, coreLoadData,mysql] = await Promise.all([
-        calculateCurrentCpuLoad(),
-        calculateCurrentMemoryLoad(),
-        calculateTotalCoreLoad(),
-        getMysqlServices()
-    ]);
+    // Always show CPU, memory, core load
+    const cpuData = await calculateCurrentCpuLoad();
+    const memoryData = await calculateCurrentMemoryLoad();
+    const coreLoadData = await calculateTotalCoreLoad();
 
-    // Convert data to JSON strings
-    const cpuDataString = JSON.stringify(cpuData);
-    const memoryDataString = JSON.stringify(memoryData);
-    const coreLoadDataString = JSON.stringify(coreLoadData);
-    const mysqlDataString = JSON.stringify(mysql);
+    // List of optional services
+    const services = [
+        { id: 'mysql', name: 'MySQL', fn: 'getMysqlServices' },
+        { id: 'mongodb', name: 'MongoDB', fn: 'getMongoDBServices' },
+        { id: 'redis', name: 'Redis', fn: 'getRedisServices' },
+        { id: 'docker', name: 'Docker', fn: 'getDockerServices' },
+        { id: 'nginx', name: 'Nginx', fn: 'getNginxServices' },
+        { id: 'apache', name: 'Apache', fn: 'getApacheServices' },
+        { id: 'elasticsearch', name: 'Elasticsearch', fn: 'getElasticsearchServices' },
+        { id: 'rabbitmq', name: 'RabbitMQ', fn: 'getRabbitMQServices' },
+        { id: 'kafka', name: 'Kafka', fn: 'getKafkaServices' },
+        { id: 'postgres', name: 'Postgres', fn: 'getPostgresServices' },
+        { id: 'oracle', name: 'OracleDB', fn: 'getOracleDBServices' },
+        { id: 'sqlserver', name: 'SqlServer', fn: 'getSqlServerServices' },
+        { id: 'gpu', name: 'GPU', fn: 'getGpuInfo' },
+        { id: 'battery', name: 'Battery', fn: 'getBatteryInfo' },
+        { id: 'network', name: 'Network', fn: 'getNetworkInfo' }
+    ];
 
-    // Dynamically build HTML content
-    const chartHtml = `
-        <div id="cpuChart" width="400" height="50"></div>
-        <div id="memoryChart" width="400" height="50"></div>
-        <div id="coreLoadChart" width="400" height="50"></div>
-        <div id="mysqlData" width="400" height="50"></div>
-    `;
+    // HTML for checkboxes
+    const graphCheckboxHtml = `<label><input type="checkbox" id="showGraph" /> Show Graph</label>`;
+    const checkboxesHtml = graphCheckboxHtml + '<br>' + services.map(s => `<label><input type="checkbox" id="${s.id}" /> ${s.name}</label>`).join('<br>');
 
-    const chartJsScript = `
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    `;
-
-    const script = `
-        <script>
-            async function createCharts() {
-                const cpuData = ${cpuDataString};
-                const memoryData = ${memoryDataString};
-                const coreLoadData = ${coreLoadDataString};
-                const mysqlData = ${mysqlDataString};
-
-                // Create charts (you can update this part based on your actual chart creation logic)
-                // For example, updateChartFunction(cpuData, memoryData, coreLoadData);
-
-                // Use the data to update the HTML content as needed
-                document.getElementById('cpuChart').innerText = 'CPU Load: ' + JSON.stringify(cpuData);
-                document.getElementById('memoryChart').innerText = 'Memory Load: ' + JSON.stringify(memoryData);
-                document.getElementById('coreLoadChart').innerText = 'Core Load: ' + JSON.stringify(coreLoadData);
-                document.getElementById('mysqlData').innerText = 'Mysql: ' + JSON.stringify(mysqlData);
+    // Main HTML and script as a single string
+    return [
+        '<div id="cpuChart" width="400" height="50"></div>',
+        '<div id="memoryChart" width="400" height="50"></div>',
+        '<div id="coreLoadChart" width="400" height="50"></div>',
+        '<div id="graphContainer" style="display:none; margin-top:20px;"><canvas id="usageGraph" width="400" height="200"></canvas></div>',
+        '<hr>',
+        '<div><strong>Optional Services:</strong></div>',
+        `<div>${checkboxesHtml}</div>`,
+        '<div id="servicesData"></div>',
+        '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>',
+        `<script>
+            const cpuData = ${JSON.stringify(cpuData)};
+            const memoryData = ${JSON.stringify(memoryData)};
+            const coreLoadData = ${JSON.stringify(coreLoadData)};
+            document.getElementById('cpuChart').innerText = 'CPU Load: ' + cpuData;
+            document.getElementById('memoryChart').innerText = 'Memory Load: ' + memoryData.toFixed(2) + '%';
+            document.getElementById('coreLoadChart').innerText = 'Core Loads: ' + coreLoadData.map(x => x.toFixed(2)).join(', ');
+            const services = ${JSON.stringify(services)};
+            async function fetchServiceData(service) {
+                const vscode = acquireVsCodeApi();
+                vscode.postMessage({ command: 'fetchService', service });
             }
-
-            createCharts();
-        </script>
-    `;
-
-    return `
-        ${chartHtml}
-        ${chartJsScript}
-        ${script}
-    `;
+            services.forEach(s => {
+                document.getElementById(s.id).addEventListener('change', function(e) {
+                    if (e.target.checked) {
+                        fetchServiceData(s.fn);
+                    } else {
+                        document.getElementById('servicesData').innerHTML = '';
+                    }
+                });
+            });
+            window.addEventListener('message', event => {
+                const message = event.data;
+                if (message.command === 'serviceData') {
+                    document.getElementById('servicesData').innerHTML = '<pre>' + JSON.stringify(message.data, null, 2) + '</pre>';
+                }
+            });
+            // Graph logic
+            const showGraphCheckbox = document.getElementById('showGraph');
+            const graphContainer = document.getElementById('graphContainer');
+            let usageChart = null;
+            showGraphCheckbox.addEventListener('change', function(e) {
+                if (e.target.checked) {
+                    graphContainer.style.display = 'block';
+                    if (!usageChart) {
+                        const ctx = document.getElementById('usageGraph').getContext('2d');
+                        usageChart = new Chart(ctx, {
+                            type: 'bar',
+                            data: {
+                                labels: ['CPU Usage', 'Memory Usage'],
+                                datasets: [{
+                                    label: 'Usage (%)',
+                                    data: [cpuData, memoryData],
+                                    backgroundColor: ['#36a2eb', '#ff6384']
+                                }]
+                            },
+                            options: {
+                                scales: {
+                                    y: { beginAtZero: true, max: 100 }
+                                }
+                            }
+                        });
+                    }
+                } else {
+                    graphContainer.style.display = 'none';
+                }
+            });
+        </script>`
+    ].join('\n');
 }
 

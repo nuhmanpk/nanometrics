@@ -12,22 +12,28 @@ Explore and monitor system metrics effortlessly with this quick and convenient V
 
 ## Features
 
+
 - Real-time CPU Load
 - Live Memory Usage
 - Core Load Monitoring
-- Running Instances of Services
+- Optional Service Monitoring (enable via checkboxes):
   - MySQL
+  - MongoDB
+  - Redis
+  - Docker
+  - Nginx
   - Apache
   - Elasticsearch
-  - Docker
-  - MongoDB
-  - Nginx
-  - Kafka
-  - PostGres
   - RabbitMQ
-  - Redis
+  - Kafka
+  - Postgres
+  - OracleDB
   - SQL Server
-- (Coming Soon)...and more!
+  - GPU
+  - Battery
+  - Network
+- Interactive Graphs (enable via 'Show Graph' checkbox):
+  - Bar chart for CPU and Memory usage
 
 ## Installation
 
@@ -38,9 +44,12 @@ Explore and monitor system metrics effortlessly with this quick and convenient V
 
 ## Usage
 
+
 1. Open the Nano Metrics side panel
-2. Explore real-time system metrics and service information
-3. Stay informed about your system's health
+2. Always see real-time CPU, memory, and core load metrics
+3. Use checkboxes to enable/disable monitoring of additional services (MySQL, MongoDB, Redis, Docker, GPU, Battery, Network, etc.)
+4. Enable the 'Show Graph' checkbox to display a bar chart of CPU and memory usage
+5. Stay informed about your system's health and performance
 
 
 ## Contribution

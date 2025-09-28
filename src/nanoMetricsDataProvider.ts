@@ -1,11 +1,8 @@
 import * as vscode from 'vscode';
 import {
     calculateCurrentCpuLoad, calculateCurrentMemoryLoad,
-    calculateTotalCoreLoad, getApacheServices, getDockerServices,
-    getElasticsearchServices, getMongoDBServices, getMysqlServices,
-    getNginxServices, getOracleDBServices, getKafkaServices, getPostgresServices,
-    getRabbitMQServices, getRedisServices, getSqlServerServices, getCpuTemperature
-} from 'sys-metrics-tracker';
+    calculateTotalCoreLoad, getMysqlServices
+} from './sysinfoMetrics';
 
 class MetricNode extends vscode.TreeItem {
     constructor (
@@ -37,43 +34,18 @@ class MetricTreeDataProvider implements vscode.TreeDataProvider<MetricNode> {
                 cpuData,
                 memoryData,
                 coreLoadData,
-                mysqlData,
-                apacheData,
-                elasticsearchData,
-                dockerData,
-                mongodbData,
-                nginxData,
-                oracleData,
-                kafkaData,
-                postGresData,
-                rabbitMqData,
-                redisData,
-                sqlServerData,
-                cpuTemperatureData
+                mysqlData
             ] = await Promise.all([
                 calculateCurrentCpuLoad(),
                 calculateCurrentMemoryLoad(),
                 calculateTotalCoreLoad(),
-                getMysqlServices(),
-                getApacheServices(),
-                getElasticsearchServices(),
-                getDockerServices(),
-                getMongoDBServices(),
-                getNginxServices(),
-                getOracleDBServices(),
-                getKafkaServices(),
-                getPostgresServices(),
-                getRabbitMQServices(),
-                getRedisServices(),
-                getSqlServerServices(),
-                getCpuTemperature()
-
+                getMysqlServices()
             ]);
 
             const serviceNodes: MetricNode[] = [
-                new MetricNode(`💻 CPU : ${cpuData.load}`, vscode.TreeItemCollapsibleState.None),
-                new MetricNode(`🧠 Memory : ${memoryData}%`, vscode.TreeItemCollapsibleState.None),
-                new MetricNode(`🔥 Core : ${coreLoadData.total}`, vscode.TreeItemCollapsibleState.None)
+                new MetricNode(`💻 CPU : ${cpuData}`, vscode.TreeItemCollapsibleState.None),
+                new MetricNode(`🧠 Memory : ${memoryData.toFixed(2)}%`, vscode.TreeItemCollapsibleState.None),
+                new MetricNode(`🔥 Core Loads : ${coreLoadData.map((load: number) => load.toFixed(2)).join(', ')}`, vscode.TreeItemCollapsibleState.None)
             ];
 
             // Function to create MetricNode for running instances of a service
@@ -88,48 +60,6 @@ class MetricTreeDataProvider implements vscode.TreeDataProvider<MetricNode> {
             // Add nodes for running instances of each service
             if (mysqlData.length > 0) {
                 serviceNodes.push(...createRunningNodes('🐬 MySQL', mysqlData));
-            }
-            if (apacheData.length > 0) {
-                serviceNodes.push(...createRunningNodes('🚀 Apache', apacheData));
-            }
-            if (elasticsearchData.length > 0) {
-                serviceNodes.push(...createRunningNodes('🔍 Elasticsearch', elasticsearchData));
-            }
-            if (dockerData.length > 0) {
-                serviceNodes.push(...createRunningNodes('🐳 Docker', dockerData));
-            }
-            if (mongodbData.length > 0) {
-                serviceNodes.push(...createRunningNodes('🍃 MongoDB', mongodbData));
-            }
-            if (nginxData.length > 0) {
-                serviceNodes.push(...createRunningNodes('🚀 Nginx', nginxData));
-            }
-            if (nginxData.length > 0) {
-                serviceNodes.push(...createRunningNodes('🚀 Kafka', kafkaData));
-            }
-            if (nginxData.length > 0) {
-                serviceNodes.push(...createRunningNodes('🚀 PostGres', postGresData));
-            }
-            if (nginxData.length > 0) {
-                serviceNodes.push(...createRunningNodes('🚀 RabbitMQ', rabbitMqData));
-            }
-            if (nginxData.length > 0) {
-                serviceNodes.push(...createRunningNodes('🚀 Redis', redisData));
-            }
-            if (nginxData.length > 0) {
-                serviceNodes.push(...createRunningNodes('🚀 Nginx', nginxData));
-            }
-            if (nginxData.length > 0) {
-                serviceNodes.push(...createRunningNodes('🚀 SQLServer', sqlServerData));
-            }
-
-            if (cpuTemperatureData) {
-                if (cpuTemperatureData.chipset !== null || undefined) {
-                    serviceNodes.push(new MetricNode(`🌡️ Temperature (Chipset): ${cpuTemperatureData.chipset}`, vscode.TreeItemCollapsibleState.None));
-                }
-                if (cpuTemperatureData.main !== null || undefined) {
-                    serviceNodes.push(new MetricNode(`🌡️ Temperature (Main): ${cpuTemperatureData.main}`, vscode.TreeItemCollapsibleState.None));
-                }
             }
 
             return serviceNodes;

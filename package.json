@@ -4,7 +4,7 @@
   "icon": "images/logo.png",
   "publisher": "nuhmanpk",
   "description": "Explore and monitor system metrics effortlessly with this quick and convenient VSCode extension. Access real-time information on CPU load, memory usage, core load, and running instances of various services right from the side panel. Stay informed about your system's health and performance with ease.",
-  "version": "0.0.2",
+  "version": "0.1.1",
   "engines": {
     "vscode": "^1.86.0"
   },
@@ -12,7 +12,9 @@
     "Visualization",
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "repository": {
     "type": "git",
@@ -20,26 +22,89 @@
   },
   "contributes": {
     "viewsContainers": {
-      "activitybar": []
-    },
-    "views": {
-      "explorer": [
+      "activitybar": [
         {
-          "id": "nanometrics",
-          "name": "NanoMetrics",
-          "icon": "images/logo.png"
+          "id": "nanometrics-sidebar",
+          "title": "Nano Metrics",
+          "icon": "media/activity.svg"
         }
       ]
     },
-    "commands": [],
+    "views": {
+      "nanometrics-sidebar": [
+        {
+          "type": "webview",
+          "id": "nanometrics.dashboard",
+          "name": "Dashboard",
+          "icon": "media/activity.svg"
+        }
+      ],
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "nanometrics.explorer",
+          "name": "NanoMetrics",
+          "icon": "media/activity.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "nanometrics.showSystem",
+        "title": "Show System Metrics",
+        "category": "Nano Metrics",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "nanometrics.showProject",
+        "title": "Show Project Monitor",
+        "category": "Nano Metrics",
+        "icon": "$(project)"
+      },
+      {
+        "command": "nanometrics.togglePause",
+        "title": "Pause / Resume Monitoring",
+        "category": "Nano Metrics",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "nanometrics.openSettings",
+        "title": "Open Settings",
+        "category": "Nano Metrics",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "nanometrics.focus",
+        "title": "Open Dashboard",
+        "category": "Nano Metrics"
+      }
+    ],
     "configuration": {
       "type": "object",
       "title": "Nano Metrics Settings",
       "properties": {
+        "nanometrics.refreshInterval": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 1000,
+          "description": "How often metrics refresh, in milliseconds."
+        },
+        "nanometrics.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show CPU and memory usage in the status bar."
+        },
+        "nanometrics.warningThreshold": {
+          "type": "number",
+          "default": 85,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Usage percentage at which CPU and memory are highlighted as a warning."
+        },
         "nanometrics.showGraph": {
           "type": "boolean",
-          "default": false,
-          "description": "Show CPU and Memory usage graph in the Nano Metrics panel."
+          "default": true,
+          "description": "Show live history graphs for CPU, memory, network and project usage."
         },
         "nanometrics.enableMysql": {
           "type": "boolean",
@@ -104,19 +169,38 @@
         "nanometrics.enableGpu": {
           "type": "boolean",
           "default": false,
-          "description": "Enable GPU metrics."
+          "description": "Show GPU information."
         },
         "nanometrics.enableBattery": {
           "type": "boolean",
           "default": false,
-          "description": "Enable Battery metrics."
+          "description": "Show battery status."
         },
         "nanometrics.enableNetwork": {
           "type": "boolean",
-          "default": false,
-          "description": "Enable Network metrics."
+          "default": true,
+          "description": "Show network throughput for the default interface."
+        },
+        "nanometrics.enableDisk": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show disk usage."
         }
       }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "nanometrics.togglePause",
+          "when": "view == nanometrics.dashboard",
+          "group": "navigation@1"
+        },
+        {
+          "command": "nanometrics.openSettings",
+          "when": "view == nanometrics.dashboard",
+          "group": "navigation@2"
+        }
+      ]
     }
   },
   "scripts": {
@@ -130,18 +214,17 @@
   },
   "devDependencies": {
     "@types/mocha": "^10.0.6",
-    "@types/node": "18.x",
+    "@types/node": "^20.19.17",
     "@types/vscode": "^1.86.0",
     "@typescript-eslint/eslint-plugin": "^6.19.1",
     "@typescript-eslint/parser": "^6.19.1",
     "@vscode/test-cli": "^0.0.4",
     "@vscode/test-electron": "^2.3.9",
     "eslint": "^8.56.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vsce": "^2.15.0"
   },
   "dependencies": {
-    "chart.js": "^4.4.1",
-    "systeminformation": "^5.27.10",
-    "vsce": "^2.15.0"
+    "systeminformation": "^5.27.10"
   }
 }

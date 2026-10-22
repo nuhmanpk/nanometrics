@@ -12,14 +12,28 @@ Explore and monitor system metrics effortlessly with this quick and convenient V
 
 ## Features
 
+### System dashboard
+- Live CPU and memory gauges with history graphs
+- Per-core load heatmap and CPU temperature (where available)
+- Network throughput (download / upload) for the default interface
+- Disk and swap usage, battery and GPU info
+- Optional service monitoring: MySQL, Postgres, MongoDB, Redis, Docker, Nginx, Apache, Elasticsearch, RabbitMQ, Kafka, OracleDB, SQL Server
 
-- Real-time CPU Load
-- Live Memory Usage
-- Core Load Monitoring
- - Optional Service Monitoring (configure via VS Code settings):
-   - MySQL, MongoDB, Redis, Docker, Nginx, Apache, Elasticsearch, RabbitMQ, Kafka, Postgres, OracleDB, SQL Server, GPU, Battery, Network
- - Interactive Graphs (enable via VS Code settings):
-   - Bar chart for CPU and Memory usage
+### Project monitor
+See what your open project is costing you, right next to your code:
+- Every process tied to the workspace — anything running in VS Code terminals, processes whose working directory is inside the project, and the language servers / linters extensions run for this window
+- Process trees with combined CPU and memory, so `npm run dev` shows the real cost of everything it spawned
+- Listening ports for each process — click to open `localhost:<port>` in the browser
+- Stop a process tree with one click
+- Git branch and one-click `package.json` scripts (npm, yarn, pnpm or bun)
+
+### Everywhere else
+- Compact **NanoMetrics** panel in the Explorer — CPU, memory, temperature (macOS), network and project at a glance
+
+  ![NanoMetrics panel in the Explorer](images/explorer.png)
+
+- CPU and memory in the status bar, highlighted when usage crosses your warning threshold
+- Uses your VS Code theme colors, light or dark
 
 ## Installation
 
@@ -30,12 +44,22 @@ Explore and monitor system metrics effortlessly with this quick and convenient V
 
 ## Usage
 
+1. Click the Nano Metrics icon in the Activity Bar for the full dashboard, or use the **NanoMetrics** panel in the Explorer
+2. Switch between the **System** and **Project** tabs
+3. Click the status bar item to jump to the dashboard
+4. Search for "Nano Metrics" in VS Code settings to tune it
 
-1. Open the Nano Metrics side panel
-2. Always see real-time CPU, memory, and core load metrics
-3. Configure which services and features to enable by searching for "Nano Metrics" in VS Code settings
-4. Enable the "Show Graph" setting to display a bar chart of CPU and memory usage
-5. Stay informed about your system's health and performance
+| Setting | Default | Description |
+| --- | --- | --- |
+| `nanometrics.refreshInterval` | `2000` | Refresh interval in milliseconds |
+| `nanometrics.showStatusBar` | `true` | Show CPU and memory in the status bar |
+| `nanometrics.warningThreshold` | `85` | Usage % highlighted as a warning |
+| `nanometrics.showGraph` | `true` | Show history graphs |
+| `nanometrics.enableNetwork` / `enableDisk` | `true` | Network and disk sections |
+| `nanometrics.enableGpu` / `enableBattery` | `false` | GPU and battery sections |
+| `nanometrics.enable<Service>` | `false` | Monitor a background service |
+
+Process working directories and ports are read with `lsof` on macOS and `/proc` on Linux. On Windows the project monitor relies on terminals and command lines.
 
 
 ## Contribution

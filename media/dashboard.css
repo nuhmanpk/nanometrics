@@ -451,3 +451,24 @@ body[data-mode="compact"] { padding: 2px 0 4px; font-size: 12px; }
 .mrow .bar { height: 4px; }
 .mspark .spark { height: 14px; }
 .mtext .port { padding: 0 4px; margin-right: 2px; font-size: 10px; }
+
+/* ---------- Claude Code window ---------- */
+.cc-session { margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px; }
+.cc-session.working { border-color: color-mix(in srgb, var(--green) 45%, transparent); }
+.cc-head { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.cc-pulse { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); opacity: .6; }
+.cc-pulse.on { background: var(--green); opacity: 1; animation: pulse 1.6s infinite; }
+.cc-now, .cc-step { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 12px; }
+.cc-now { padding: 5px 8px; border-radius: 6px; background: color-mix(in srgb, var(--green) 10%, transparent); }
+.cc-step { padding: 2px 0; }
+.cc-step .muted { margin-left: auto; flex: none; font-size: 11px; }
+.cc-session .tool { flex: none; font-weight: 600; color: var(--blue); }
+.cc-session .detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; }
+.cc-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.cc-todos { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; font-size: 12px; }
+.cc-todo { display: flex; gap: 6px; color: var(--muted); }
+.cc-todo .ico { flex: none; width: 12px; text-align: center; }
+.cc-todo.completed { text-decoration: line-through; opacity: .7; }
+.cc-todo.in_progress { color: var(--fg); font-weight: 600; }
+.cc-todo.in_progress .ico { color: var(--green); }
+.cc-stats { grid-template-columns: repeat(2, 1fr); }

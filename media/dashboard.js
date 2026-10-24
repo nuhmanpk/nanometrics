@@ -13,6 +13,7 @@
     info: [],
     system: null,
     project: null,
+    claude: null,
     history: { cpu: [], memory: [], rx: [], tx: [], temp: [], projectCpu: [], projectMem: [] },
     isMac: false,
     expanded: new Set(saved.expanded || []),
@@ -197,6 +198,53 @@
     }[o] || '';
   }
 
+  // ---------- Claude Code window ----------
+  const ago = (t) => {
+    const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ago`;
+  };
+  const todoIcon = { completed: '✓', in_progress: '●', pending: '○' };
+
+  function claudeSession(c, first) {
+    const working = c.state === 'working';
+    const done = c.todos.filter((t) => t.status === 'completed').length;
+    const total = c.todos.length;
+    const open = first || state.expanded.has(c.id);
+    const cur = c.current;
+    const progress = total
+      ? `<div class="cc-progress"><div class="row-head"><span class="label">Progress</span><span class="muted num">${done}/${total} tasks</span></div>
+          <div class="bar"><div style="width:${(done / total) * 100}%;background:var(--green)"></div></div>
+          <div class="cc-todos">${c.todos.map((t) => `<div class="cc-todo ${t.status}"><span class="ico">${todoIcon[t.status] || '○'}</span><span>${esc(t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content)}</span></div>`).join('')}</div>
+        </div>`
+      : '';
+    const steps = c.steps.length
+      ? `<div class="cc-steps">${c.steps.map((s) => `<div class="cc-step"><span class="tool">${esc(s.tool)}</span><span class="detail" title="${esc(s.detail)}">${esc(s.detail)}</span><span class="muted">${ago(s.time)}</span></div>`).join('')}</div>`
+      : '';
+    return `<div class="card cc-session ${working ? 'working' : ''}">
+      <div class="cc-head" data-action="toggle" data-pid="${esc(c.id)}">
+        <span class="cc-pulse ${working ? 'on' : ''}"></span>
+        <div class="proc-main">
+          <div class="proc-title"><span class="pname" title="${esc(c.title)}">${esc(c.title)}</span></div>
+          <div class="proc-cmd">${working ? 'Working' : 'Idle'} · ${ago(c.updated)}${c.model ? ` · ${esc(c.model)}` : ''}</div>
+        </div>
+      </div>
+      ${cur ? `<div class="cc-now"><span class="tool">${esc(cur.tool)}</span><span class="detail" title="${esc(cur.detail)}">${esc(cur.detail)}</span></div>` : ''}
+      ${progress}
+      <div class="stats cc-stats">
+        <div class="stat"><div class="v num">${c.toolCalls}</div><div class="l">Tool calls</div></div>
+        <div class="stat"><div class="v num">${c.filesTouched}</div><div class="l">Files edited</div></div>
+      </div>
+      ${open && steps ? `<div class="cc-label">Recent activity</div>${steps}` : ''}
+    </div>`;
+  }
+
+  function claudeView() {
+    const c = state.claude;
+    if (!c || !c.sessions.length) { return ''; }
+    const live = c.sessions.filter((s) => s.state === 'working').length;
+    return section('Claude Code', c.sessions.map((s, i) => claudeSession(s, i === 0)).join(''), live ? `${live} working` : 'idle');
+  }
+
   function projectView() {
     if (!state.hasWorkspace) {
       return `<div class="empty-state"><div class="title">No folder open</div>Open a folder or workspace to monitor the processes, ports and resources your project uses.</div>`;
@@ -220,6 +268,8 @@
       </div>
       ${spark([{ values: h.projectCpu, color: 'var(--blue)' }])}
     </div>`;
+
+    out += claudeView();
 
     if (p.ports.length) {
       const chips = p.ports.map((x) => `<button class="chip" data-action="openPort" data-port="${x.port}" title="${esc(x.name)} (PID ${x.pid}) — open in browser"><span class="dot" style="background:var(--green)"></span><span class="mono">localhost:${x.port}</span><span class="meta">${esc(x.name)}</span></button>`).join('');
@@ -370,7 +420,7 @@
         vscode.postMessage({ type: 'open', tab: d.tab });
         return;
       case 'toggle': {
-        const pid = Number(d.pid);
+        const pid = /^\d+$/.test(d.pid || '') ? Number(d.pid) : d.pid;
         state.expanded.has(pid) ? state.expanded.delete(pid) : state.expanded.add(pid);
         break;
       }
@@ -427,6 +477,9 @@
         state.project = m.data;
         state.history = m.history;
         state.error = '';
+        break;
+      case 'claude':
+        state.claude = m.data;
         break;
       case 'projectInfo':
         state.info = m.info;

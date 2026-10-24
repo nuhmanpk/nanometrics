@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { collectSystem, SystemOptions, SystemSnapshot } from './sysinfoMetrics';
+import { collectClaude, ClaudeSnapshot } from './claudeActivity';
 import { collectProject, killProcessTree, ProjectSnapshot, readProjectInfo, ProjectInfo } from './projectMetrics';
 
 type Tab = 'system' | 'project';
@@ -61,6 +62,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
 
     private lastSystem?: SystemSnapshot;
     private lastProject?: ProjectSnapshot;
+    private lastClaude?: ClaudeSnapshot;
 
     private readonly _onSystem = new vscode.EventEmitter<SystemSnapshot>();
     readonly onSystem = this._onSystem.event;
@@ -207,6 +209,9 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
                 this.history.projectMem.push(project.memRss);
                 this.lastProject = project;
                 this.post({ type: 'project', data: project, history: this.historyPayload() });
+
+                this.lastClaude = await collectClaude(folders);
+                this.post({ type: 'claude', data: this.lastClaude });
             }
         } catch (err) {
             this.post({ type: 'error', message: String(err instanceof Error ? err.message : err) });
@@ -243,6 +248,9 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
         }
         if (this.lastProject) {
             this.post({ type: 'project', data: this.lastProject, history: this.historyPayload() });
+        }
+        if (this.lastClaude) {
+            this.post({ type: 'claude', data: this.lastClaude });
         }
     }
 

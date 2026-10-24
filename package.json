@@ -4,7 +4,7 @@
   "icon": "images/logo.png",
   "publisher": "nuhmanpk",
   "description": "Explore and monitor system metrics effortlessly with this quick and convenient VSCode extension. Access real-time information on CPU load, memory usage, core load, and running instances of various services right from the side panel. Stay informed about your system's health and performance with ease.",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "engines": {
     "vscode": "^1.86.0"
   },

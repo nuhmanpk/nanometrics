@@ -4,7 +4,7 @@
 
 Explore and monitor system metrics effortlessly with this quick and convenient VSCode extension. Access real-time information on CPU load, memory usage, core load, and running instances of various services right from the side panel. Stay informed about your system's health and performance with ease.
 
-![Nano Metrics Demo](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/demo.gif)
+![NanoMetrics panel in the Explorer](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/explorer.png)
 
 
   [![Version](https://img.shields.io/visual-studio-marketplace/v/nuhmanpk.nanometrics.svg)](https://marketplace.visualstudio.com/items?itemName=nuhmanpk.nanometrics)
@@ -12,12 +12,27 @@ Explore and monitor system metrics effortlessly with this quick and convenient V
 
 ## Features
 
+### Claude Code activity tracking
+Watch your AI pair programmer work, without leaving the sidebar. The Project tab has a dedicated **Claude Code** window for every recent session in your workspace:
+- **Live status** - working or idle, with a pulse while Claude is actively writing
+- **What it's doing right now** - the current tool call (editing a file, running a command, searching...)
+- **Progress tracking** - Claude's task plan with done/total, a progress bar and the active step highlighted
+- **Recent activity timeline** - the last actions, with timestamps
+- **Session stats** - tool calls made and files edited
+- Pairs with the process list, so you see what Claude's `claude`, dev servers and test runs cost in CPU and memory
+
+It reads Claude Code's local session transcripts (`~/.claude/projects`). Nothing is uploaded.
+
+![Project dashboard with Claude Code tracking](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/image_project_dashboard.png)
+
 ### System dashboard
 - Live CPU and memory gauges with history graphs
 - Per-core load heatmap and CPU temperature (where available)
 - Network throughput (download / upload) for the default interface
 - Disk and swap usage, battery and GPU info
 - Optional service monitoring: MySQL, Postgres, MongoDB, Redis, Docker, Nginx, Apache, Elasticsearch, RabbitMQ, Kafka, OracleDB, SQL Server
+
+![System dashboard](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/image_dashboard.png)
 
 ### Project monitor
 See what your open project is costing you, right next to your code:
@@ -29,8 +44,6 @@ See what your open project is costing you, right next to your code:
 
 ### Everywhere else
 - Compact **NanoMetrics** panel in the Explorer — CPU, memory, temperature (macOS), network and project at a glance
-
-  ![NanoMetrics panel in the Explorer](images/explorer.png)
 
 - CPU and memory in the status bar, highlighted when usage crosses your warning threshold
 - Uses your VS Code theme colors, light or dark

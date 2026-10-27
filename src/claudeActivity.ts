@@ -1,7 +1,9 @@
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { DEFAULT_PRICING, formatCost, formatTokens, PriceTable, totalTokens, UsageTracker } from './claudeUsage';
+import {
+  addUsage, DEFAULT_PRICING, emptyUsage, formatCost, formatTokens, PriceTable, TokenUsage, totalTokens, UsageTracker
+} from './claudeUsage';
 
 export interface ClaudeTodo {
   content: string;
@@ -13,6 +15,17 @@ export interface ClaudeStep {
   tool: string;
   detail: string;
   time: number;
+}
+
+export interface ClaudeAgent {
+  id: string;
+  description: string;
+  type: string;
+  state: 'working' | 'done';
+  updated: number;
+  toolCalls: number;
+  tokens: string;
+  cost: string;
 }
 
 export interface ClaudeSession {
@@ -32,6 +45,8 @@ export interface ClaudeSession {
   tokens: string;
   tokenDetail: string;
   cost: string;
+  // Subagents the session spawned, newest first. Their tokens and cost are included in the session totals.
+  agents: ClaudeAgent[];
 }
 
 export interface ClaudeSnapshot {
@@ -42,6 +57,8 @@ export interface ClaudeSnapshot {
 // A session counts as live while its transcript changed this recently.
 const WORKING_MS = 20_000;
 const RECENT_MS = 30 * 60_000;
+// Sessions untouched this long are not checked for running subagents.
+const STALE_MS = 24 * 60 * 60_000;
 const TAIL_BYTES = 1024 * 1024;
 const MAX_STEPS = 8;
 
@@ -159,7 +176,17 @@ async function readUsage(file: string, size: number, pricing: PriceTable): Promi
   return entry.tracker;
 }
 
-function parse(text: string, id: string, folder: string, mtime: number, tracker: UsageTracker): ClaudeSession {
+interface Parsed {
+  steps: ClaudeStep[];
+  files: Set<string>;
+  todos: ClaudeTodo[];
+  title: string;
+  lastPrompt: string;
+  model: string;
+  toolCalls: number;
+}
+
+function parse(text: string, mtime: number): Parsed {
   const steps: ClaudeStep[] = [];
   const files = new Set<string>();
   let todos: ClaudeTodo[] = [];
@@ -202,24 +229,120 @@ function parse(text: string, id: string, folder: string, mtime: number, tracker:
     }
   }
 
-  const recent = steps.slice(-MAX_STEPS).reverse();
-  const working = Date.now() - mtime < WORKING_MS;
+  return { steps, files, todos, title, lastPrompt, model, toolCalls };
+}
+
+interface AgentFile {
+  file: string;
+  mtime: number;
+  size: number;
+}
+
+/** Subagent transcripts live under <session>/subagents, workflow agents one level deeper per run. */
+async function agentFiles(dir: string): Promise<AgentFile[]> {
+  const out: AgentFile[] = [];
+  const walk = async (d: string, depth: number) => {
+    let entries: import('fs').Dirent[];
+    try {
+      entries = await fs.readdir(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    await Promise.all(entries.map(async e => {
+      const p = path.join(d, e.name);
+      if (e.isDirectory() && depth < 3) {
+        await walk(p, depth + 1);
+      } else if (e.isFile() && e.name.endsWith('.jsonl')) {
+        try {
+          const st = await fs.stat(p);
+          if (st.size > 0) {
+            out.push({ file: p, mtime: st.mtimeMs, size: st.size });
+          }
+        } catch {
+          // Removed while listing.
+        }
+      }
+    }));
+  };
+  await walk(path.join(dir, 'subagents'), 0);
+  return out;
+}
+
+async function readMeta(file: string): Promise<{ description?: string; agentType?: string }> {
+  try {
+    return JSON.parse(await fs.readFile(file.replace(/\.jsonl$/, '.meta.json'), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function usageText(tracker: { usage: TokenUsage }) {
+  const u = tracker.usage;
+  return `Input ${formatTokens(u.input)} · Output ${formatTokens(u.output)} · ` +
+    `Cache read ${formatTokens(u.cacheRead)} · Cache write ${formatTokens(u.cacheWrite5m + u.cacheWrite1h)}`;
+}
+
+async function readSession(name: string, folder: string, main: AgentFile, subs: AgentFile[], pricing: PriceTable): Promise<ClaudeSession> {
+  const now = Date.now();
+  const [text, tracker] = await Promise.all([readTail(main.file, main.size), readUsage(main.file, main.size, pricing)]);
+  const own = parse(text, main.mtime);
+
+  const usage = emptyUsage();
+  addUsage(usage, tracker.usage);
+  let cost = tracker.totalCost;
+  let toolCalls = own.toolCalls;
+  const files = new Set(own.files);
+  const steps = [...own.steps];
+  let updated = main.mtime;
+
+  const agents: ClaudeAgent[] = [];
+  for (const sub of subs) {
+    try {
+      const [subText, subTracker, meta] = await Promise.all([
+        readTail(sub.file, sub.size), readUsage(sub.file, sub.size, pricing), readMeta(sub.file)
+      ]);
+      const p = parse(subText, sub.mtime);
+      addUsage(usage, subTracker.usage);
+      if (subTracker.totalCost !== null) {
+        cost = (cost ?? 0) + subTracker.totalCost;
+      }
+      toolCalls += p.toolCalls;
+      p.files.forEach(f => files.add(f));
+      steps.push(...p.steps);
+      updated = Math.max(updated, sub.mtime);
+      agents.push({
+        id: path.basename(sub.file, '.jsonl'),
+        description: short(meta.description || p.title || 'Subagent', 60),
+        type: meta.agentType ?? '',
+        state: now - sub.mtime < WORKING_MS ? 'working' : 'done',
+        updated: sub.mtime,
+        toolCalls: p.toolCalls,
+        tokens: formatTokens(totalTokens(subTracker.usage)),
+        cost: formatCost(subTracker.totalCost)
+      });
+    } catch {
+      // Transcript rotated or unreadable.
+    }
+  }
+  agents.sort((a, b) => b.updated - a.updated);
+
+  const recent = steps.sort((a, b) => a.time - b.time).slice(-MAX_STEPS).reverse();
   return {
-    id,
+    id: name,
     folder,
-    title: short(title || lastPrompt || 'Claude Code session', 70),
-    state: working ? 'working' : 'idle',
-    updated: mtime,
-    model: model.replace(/^claude-/, ''),
+    title: short(own.title || own.lastPrompt || 'Claude Code session', 70),
+    state: now - updated < WORKING_MS ? 'working' : 'idle',
+    updated,
+    model: own.model.replace(/^claude-/, ''),
     current: recent[0] ?? null,
     steps: recent,
-    todos,
+    todos: own.todos,
     toolCalls,
     filesTouched: files.size,
-    tokens: formatTokens(totalTokens(tracker.usage)),
-    tokenDetail: `Input ${formatTokens(tracker.usage.input)} · Output ${formatTokens(tracker.usage.output)} · ` +
-      `Cache read ${formatTokens(tracker.usage.cacheRead)} · Cache write ${formatTokens(tracker.usage.cacheWrite5m + tracker.usage.cacheWrite1h)}`,
-    cost: formatCost(tracker.totalCost)
+    tokens: formatTokens(totalTokens(usage)),
+    tokenDetail: usageText({ usage }),
+    cost: formatCost(cost),
+    agents
   };
 }
 
@@ -238,21 +361,27 @@ export async function collectClaude(folders: string[], pricing: PriceTable = DEF
     }
     const stats = await Promise.all(names.map(async n => {
       try {
-        const st = await fs.stat(path.join(dir, n));
-        return { name: n, mtime: st.mtimeMs, size: st.size };
+        const file = path.join(dir, n);
+        const st = await fs.stat(file);
+        if (st.size === 0 || now - st.mtimeMs > STALE_MS) {
+          return null;
+        }
+        const main: AgentFile = { file, mtime: st.mtimeMs, size: st.size };
+        const subs = await agentFiles(path.join(dir, n.replace(/\.jsonl$/, '')));
+        // A parent waiting on background agents stays quiet, so its agents count towards how recent it is.
+        const mtime = Math.max(main.mtime, ...subs.map(s => s.mtime));
+        return { name: n, main, subs, mtime };
       } catch {
         return null;
       }
     }));
     const recent = stats
-      .filter((s): s is NonNullable<typeof s> => !!s && now - s.mtime < RECENT_MS && s.size > 0)
+      .filter((s): s is NonNullable<typeof s> => !!s && now - s.mtime < RECENT_MS)
       .sort((a, b) => b.mtime - a.mtime)
       .slice(0, 3);
     for (const s of recent) {
       try {
-        const file = path.join(dir, s.name);
-        const [text, tracker] = await Promise.all([readTail(file, s.size), readUsage(file, s.size, pricing)]);
-        sessions.push(parse(text, s.name.replace(/\.jsonl$/, ''), path.basename(folder), s.mtime, tracker));
+        sessions.push(await readSession(s.name.replace(/\.jsonl$/, ''), path.basename(folder), s.main, s.subs, pricing));
       } catch {
         // Transcript rotated or unreadable.
       }

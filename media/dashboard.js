@@ -220,6 +220,12 @@
     const steps = c.steps.length
       ? `<div class="cc-steps">${c.steps.map((s) => `<div class="cc-step"><span class="tool">${esc(s.tool)}</span><span class="detail" title="${esc(s.detail)}">${esc(s.detail)}</span><span class="muted">${ago(s.time)}</span></div>`).join('')}</div>`
       : '';
+    const agents = c.agents || [];
+    const running = agents.filter((a) => a.state === 'working').length;
+    const agentList = agents.length
+      ? `<div class="cc-label">Agents · ${running ? `${running} running · ` : ''}${agents.length} total</div>
+        <div class="cc-steps">${agents.slice(0, open ? agents.length : 3).map((a) => `<div class="cc-step"><span class="cc-pulse ${a.state === 'working' ? 'on' : ''}"></span><span class="detail" title="${esc(a.type)}">${esc(a.description)}</span><span class="muted num">${a.toolCalls} calls · ${esc(a.tokens)} · ${esc(a.cost)}</span></div>`).join('')}</div>`
+      : '';
     return `<div class="card cc-session ${working ? 'working' : ''}">
       <div class="cc-head" data-action="toggle" data-pid="${esc(c.id)}">
         <span class="cc-pulse ${working ? 'on' : ''}"></span>
@@ -236,6 +242,7 @@
         <div class="stat" title="${esc(c.tokenDetail)}"><div class="v num">${esc(c.tokens)}</div><div class="l">Tokens</div></div>
         <div class="stat" title="Estimated from token usage and model pricing"><div class="v num">${esc(c.cost)}</div><div class="l">Est. cost</div></div>
       </div>
+      ${agentList}
       ${open && steps ? `<div class="cc-label">Recent activity</div>${steps}` : ''}
     </div>`;
   }

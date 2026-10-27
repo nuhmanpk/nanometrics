@@ -62,6 +62,7 @@ Watch your AI pair programmer work, without leaving the sidebar. The Project tab
 - **Live status** - working or idle, with a pulse while Claude is actively writing
 - **What it's doing right now** - the current tool call (editing a file, running a command, searching...)
 - **Tokens and cost** - total tokens per session and an estimated cost from the transcript's usage data (prices are estimates, override with `nanometrics.claudePricing`)
+- **Subagents and workflows** - every agent the session spawns (Task/Agent calls and workflow agents) listed with running/done status, tool calls, tokens and cost; their usage is included in the session totals
 - **Progress tracking** - Claude's task plan with done/total, a progress bar and the active step highlighted
 - **Recent activity timeline** - the last actions, with timestamps
 - **Session stats** - tool calls made and files edited

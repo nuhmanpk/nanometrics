@@ -4,6 +4,13 @@ All notable changes to the "nanometrics" extension will be documented in this fi
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.4.0]
+
+- **Claude Code** now tracks subagents: transcripts under `<session>/subagents/` (including workflow agents) are read alongside the main session
+  - New **Agents** list per session: name, running / done, tool calls, tokens and cost for each agent
+  - Session tokens, cost, tool calls, edited files and recent activity include subagent work (previously only the parent session was counted)
+  - A session stays **working** while any of its agents is running, even when the parent is quietly waiting
+
 ## [0.3.1]
 
 - Fixed Claude Code cost estimates: prices now follow the current Anthropic list prices per model (Claude Opus 5.5 $4/$20, Claude Sonnet 5.5 $2/$10, Claude Haiku 5.5 $0.10/$0.50, Claude Fable 5.1 $10/$50, plus older models) instead of one price per family

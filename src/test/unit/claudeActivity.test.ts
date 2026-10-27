@@ -85,6 +85,27 @@ suite('claudeActivity', () => {
         assert.strictEqual(s.tokens, '10');
     });
 
+    test('rolls subagent and workflow agent transcripts into the session', async () => {
+        await fs.writeFile(transcript, assistant('m1', { input_tokens: 1000 }) + '\n');
+        const subs = path.join(path.dirname(transcript), 'session-1', 'subagents');
+        await fs.mkdir(path.join(subs, 'workflows', 'wf_1'), { recursive: true });
+        await fs.writeFile(path.join(subs, 'agent-a.jsonl'), assistant('s1', { input_tokens: 2000 }, [
+            { type: 'tool_use', name: 'Write', input: { file_path: '/work/demo-app/b.ts' } }
+        ]) + '\n');
+        await fs.writeFile(path.join(subs, 'agent-a.meta.json'), JSON.stringify({ description: 'Build chapter', agentType: 'general-purpose' }));
+        await fs.writeFile(path.join(subs, 'workflows', 'wf_1', 'agent-b.jsonl'), assistant('s2', { input_tokens: 500 }) + '\n');
+
+        const s = (await collectClaude([folder])).sessions[0];
+        assert.strictEqual(s.tokens, '3.5k');
+        assert.strictEqual(s.toolCalls, 1);
+        assert.strictEqual(s.filesTouched, 1);
+        assert.strictEqual(s.agents.length, 2);
+        const a = s.agents.find(x => x.id === 'agent-a')!;
+        assert.strictEqual(a.description, 'Build chapter');
+        assert.strictEqual(a.tokens, '2.0k');
+        assert.strictEqual(a.state, 'working');
+    });
+
     test('returns no sessions when the project has no transcripts', async () => {
         assert.deepStrictEqual((await collectClaude(['/somewhere/else'])).sessions, []);
     });

@@ -2,15 +2,54 @@
 
 ![Nano Metrics Logo](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/logo-full.png)
 
+
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=nuhmanpk.nanometrics">
+    <img src="https://badgen.net/vs-marketplace/v/nuhmanpk.nanometrics?label=VS%20Code" alt="Version">
+  </a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=nuhmanpk.nanometrics">
+    <img src="https://badgen.net/vs-marketplace/i/nuhmanpk.nanometrics?label=Installs" alt="Installs">
+  </a>
+  <a href="https://github.com/nuhmanpk/nanometrics">
+    <img src="https://img.shields.io/github/stars/nuhmanpk/nanometrics?style=flat-square&label=Stars" alt="GitHub Stars">
+  </a>
+  <a href="https://github.com/nuhmanpk/nanometrics/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/nuhmanpk/nanometrics?style=flat-square&label=License" alt="License">
+  </a>
+  <a href="https://github.com/nuhmanpk/nanometrics/commits/main">
+    <img src="https://img.shields.io/github/last-commit/nuhmanpk/nanometrics?style=flat-square&label=Last%20Commit" alt="Last Commit">
+  </a>
+  <a href="https://github.com/nuhmanpk/nanometrics">
+    <img src="https://img.shields.io/github/repo-size/nuhmanpk/nanometrics?style=flat-square&label=Repo%20Size" alt="Repository Size">
+  </a>
+  <a href="https://github.com/nuhmanpk/nanometrics/issues">
+    <img src="https://img.shields.io/github/issues/nuhmanpk/nanometrics?style=flat-square&label=Issues" alt="GitHub Issues">
+  </a>
+  <a href="https://github.com/nuhmanpk/nanometrics/pulls">
+    <img src="https://img.shields.io/github/issues-pr/nuhmanpk/nanometrics?style=flat-square&label=Pull%20Requests" alt="Pull Requests">
+  </a>
+  <img src="https://img.shields.io/badge/Platform-VS%20Code-007ACC?style=flat-square&logo=visualstudiocode&logoColor=white" alt="VS Code">
+  <img src="https://img.shields.io/badge/Made%20with-TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript">
+  <a href="https://www.producthunt.com/products/nano-metrics">
+    <img src="https://img.shields.io/badge/Product%20Hunt-Follow-DA552F?style=flat-square&logo=producthunt&logoColor=white" alt="Product Hunt">
+  </a>
+</p>
+
+
+----
+
 ![Claude Code session tracked live in Nano Metrics](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/claude_working.png)
 
 Explore and monitor system metrics effortlessly with this quick and convenient VSCode extension. Access real-time information on CPU load, memory usage, core load, and running instances of various services right from the side panel. Stay informed about your system's health and performance with ease.
 
 ![NanoMetrics panel in the Explorer](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/explorer.png)
 
+<p align="center">
+  <a href="https://www.producthunt.com/products/nano-metrics?utm_source=badge-follow&utm_medium=badge&utm_source=badge-nano&#0045;metrics" target="_blank">
+    <img src="https://api.producthunt.com/widgets/embed-image/v1/follow.svg?product_id=1357538&theme=light" alt="Nano Metrics on Product Hunt" width="250" height="54">
+  </a>
+</p>
 
-  [![Version](https://img.shields.io/visual-studio-marketplace/v/nuhmanpk.nanometrics.svg)](https://marketplace.visualstudio.com/items?itemName=nuhmanpk.nanometrics)
-  [![Downloads](https://img.shields.io/visual-studio-marketplace/d/nuhmanpk.nanometrics.svg)](https://marketplace.visualstudio.com/items?itemName=nuhmanpk.nanometrics)
 
 ## Features
 

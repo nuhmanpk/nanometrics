@@ -4,6 +4,23 @@ All notable changes to the "nanometrics" extension will be documented in this fi
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.3.1]
+
+- Fixed Claude Code cost estimates: prices now follow the current Anthropic list prices per model (Claude Opus 5.5 $4/$20, Claude Sonnet 5.5 $2/$10, Claude Haiku 5.5 $0.10/$0.50, Claude Fable 5.1 $10/$50, plus older models) instead of one price per family
+  - Model specific cache read prices (e.g. $0.20 per MTok on Claude Opus 5.5) and the Claude Haiku 5.5 rate for prompts over 100k tokens
+  - Claude Fable and Mythos sessions now show a cost instead of `—`
+  - `nanometrics.claudePricing` accepts an optional third value for the cache read price, and overrides take priority over the built-in prices
+
+## [0.3.0]
+
+- **Claude Code** sessions now show total **tokens** and an **estimated cost**, read from the local session transcript (hover Tokens for the input / output / cache breakdown)
+  - Prices are estimates per model family; override them with `nanometrics.claudePricing`
+- New `nanometrics.statusBarStyle` setting: `compact` shortens the status bar readout to e.g. `12·45%`
+- Charts adapt to light and high-contrast themes
+- 16 more services: Neo4j, Cassandra, MariaDB, CouchDB, InfluxDB, ClickHouse, Memcached, etcd, Consul, ZooKeeper, Prometheus, Grafana, MinIO, HAProxy, Traefik, Ollama
+- Unit tests for usage parsing, cost, transcript reading and the status bar (`npm run test:unit`)
+- Fixed the ESLint config error, updated dependencies and cleared all `npm audit` findings
+
 ## [0.2.0]
 
 - New **Claude Code** window in the Project tab: live view of what Claude Code is doing in your workspace

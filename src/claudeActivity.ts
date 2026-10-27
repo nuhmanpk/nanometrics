@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { DEFAULT_PRICING, formatCost, formatTokens, PriceTable, totalTokens, UsageTracker } from './claudeUsage';
 
 export interface ClaudeTodo {
   content: string;
@@ -27,6 +28,10 @@ export interface ClaudeSession {
   todos: ClaudeTodo[];
   toolCalls: number;
   filesTouched: number;
+  // Whole-session totals, preformatted for display.
+  tokens: string;
+  tokenDetail: string;
+  cost: string;
 }
 
 export interface ClaudeSnapshot {
@@ -98,7 +103,63 @@ async function readTail(file: string, size: number): Promise<string> {
   }
 }
 
-function parse(text: string, id: string, folder: string, mtime: number): ClaudeSession {
+interface FileUsage {
+  offset: number;
+  tracker: UsageTracker;
+}
+
+// Usage has to cover the whole transcript, not just the tail, so each file is read once and then only its new bytes.
+const usageCache = new Map<string, FileUsage>();
+const CHUNK_BYTES = 4 * 1024 * 1024;
+
+async function readUsage(file: string, size: number, pricing: PriceTable): Promise<UsageTracker> {
+  let entry = usageCache.get(file);
+  if (!entry || size < entry.offset) {
+    entry = { offset: 0, tracker: new UsageTracker(pricing) };
+    usageCache.set(file, entry);
+  }
+  entry.tracker.setPricing(pricing);
+  if (size === entry.offset) {
+    return entry.tracker;
+  }
+  const handle = await fs.open(file, 'r');
+  try {
+    let carry: Buffer = Buffer.alloc(0);
+    let pos = entry.offset;
+    while (pos < size) {
+      const length = Math.min(CHUNK_BYTES, size - pos);
+      const buf = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buf, 0, length, pos);
+      if (bytesRead === 0) {
+        break;
+      }
+      pos += bytesRead;
+      const data = Buffer.concat([carry, buf.subarray(0, bytesRead)]);
+      const end = data.lastIndexOf(0x0a);
+      carry = end === -1 ? data : data.subarray(end + 1);
+      if (end === -1) {
+        continue;
+      }
+      for (const line of data.subarray(0, end).toString('utf8').split('\n')) {
+        if (!line.includes('"usage"')) {
+          continue;
+        }
+        try {
+          entry.tracker.ingest(JSON.parse(line));
+        } catch {
+          // Partial or corrupt line.
+        }
+      }
+    }
+    // An unfinished last line is re-read next time.
+    entry.offset = pos - carry.length;
+  } finally {
+    await handle.close();
+  }
+  return entry.tracker;
+}
+
+function parse(text: string, id: string, folder: string, mtime: number, tracker: UsageTracker): ClaudeSession {
   const steps: ClaudeStep[] = [];
   const files = new Set<string>();
   let todos: ClaudeTodo[] = [];
@@ -154,12 +215,16 @@ function parse(text: string, id: string, folder: string, mtime: number): ClaudeS
     steps: recent,
     todos,
     toolCalls,
-    filesTouched: files.size
+    filesTouched: files.size,
+    tokens: formatTokens(totalTokens(tracker.usage)),
+    tokenDetail: `Input ${formatTokens(tracker.usage.input)} · Output ${formatTokens(tracker.usage.output)} · ` +
+      `Cache read ${formatTokens(tracker.usage.cacheRead)} · Cache write ${formatTokens(tracker.usage.cacheWrite5m + tracker.usage.cacheWrite1h)}`,
+    cost: formatCost(tracker.totalCost)
   };
 }
 
 /** Reads Claude Code transcripts for the workspace folders and summarizes what each recent session is doing. */
-export async function collectClaude(folders: string[]): Promise<ClaudeSnapshot> {
+export async function collectClaude(folders: string[], pricing: PriceTable = DEFAULT_PRICING): Promise<ClaudeSnapshot> {
   const sessions: ClaudeSession[] = [];
   const now = Date.now();
 
@@ -185,8 +250,9 @@ export async function collectClaude(folders: string[]): Promise<ClaudeSnapshot> 
       .slice(0, 3);
     for (const s of recent) {
       try {
-        const text = await readTail(path.join(dir, s.name), s.size);
-        sessions.push(parse(text, s.name.replace(/\.jsonl$/, ''), path.basename(folder), s.mtime));
+        const file = path.join(dir, s.name);
+        const [text, tracker] = await Promise.all([readTail(file, s.size), readUsage(file, s.size, pricing)]);
+        sessions.push(parse(text, s.name.replace(/\.jsonl$/, ''), path.basename(folder), s.mtime, tracker));
       } catch {
         // Transcript rotated or unreadable.
       }

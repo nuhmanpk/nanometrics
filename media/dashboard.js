@@ -233,6 +233,8 @@
       <div class="stats cc-stats">
         <div class="stat"><div class="v num">${c.toolCalls}</div><div class="l">Tool calls</div></div>
         <div class="stat"><div class="v num">${c.filesTouched}</div><div class="l">Files edited</div></div>
+        <div class="stat" title="${esc(c.tokenDetail)}"><div class="v num">${esc(c.tokens)}</div><div class="l">Tokens</div></div>
+        <div class="stat" title="Estimated from token usage and model pricing"><div class="v num">${esc(c.cost)}</div><div class="l">Est. cost</div></div>
       </div>
       ${open && steps ? `<div class="cc-label">Recent activity</div>${steps}` : ''}
     </div>`;

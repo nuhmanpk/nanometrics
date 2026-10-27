@@ -472,3 +472,23 @@ body[data-mode="compact"] { padding: 2px 0 4px; font-size: 12px; }
 .cc-todo.in_progress { color: var(--fg); font-weight: 600; }
 .cc-todo.in_progress .ico { color: var(--green); }
 .cc-stats { grid-template-columns: repeat(2, 1fr); }
+
+/* ---------- Theme variants ---------- */
+/* Charts take their colors from the active theme's chart palette; these only adjust weight and contrast. */
+body.vscode-light { --card: color-mix(in srgb, var(--fg) 5%, transparent); --track: color-mix(in srgb, var(--fg) 12%, transparent); }
+body.vscode-light .spark path.area { opacity: .24; }
+body.vscode-light .spark path.line { stroke-width: 1.8; }
+body.vscode-high-contrast,
+body.vscode-high-contrast-light {
+  --card: transparent;
+  --border: var(--vscode-contrastBorder, var(--fg));
+  --track: color-mix(in srgb, var(--fg) 30%, transparent);
+}
+body.vscode-high-contrast .spark path.area,
+body.vscode-high-contrast-light .spark path.area { opacity: .3; }
+body.vscode-high-contrast .spark path.line,
+body.vscode-high-contrast-light .spark path.line { stroke-width: 2.2; }
+@media (forced-colors: active) {
+  .spark path.line { stroke: CanvasText; }
+  .spark path.area { fill: CanvasText; }
+}

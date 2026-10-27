@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { DashboardViewProvider } from './dashboardView';
+import { statusView, StatusBarStyle } from './statusText';
 
 const WELCOME_KEY = 'nanometrics.welcomeShown';
 
@@ -31,14 +32,16 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }),
         dashboard.onSystem(s => {
-            const warning = vscode.workspace.getConfiguration('nanometrics').get('warningThreshold', 85);
-            const cpu = Math.round(s.cpu.load);
-            const mem = Math.round(s.memory.percent);
-            statusBar.text = `$(pulse) ${cpu}%  $(server) ${mem}%`;
-            statusBar.tooltip = `Nano Metrics\nCPU ${cpu}% · Memory ${mem}%\nClick to open dashboard`;
-            statusBar.backgroundColor = cpu >= warning || mem >= warning
-                ? new vscode.ThemeColor('statusBarItem.warningBackground')
-                : undefined;
+            const config = vscode.workspace.getConfiguration('nanometrics');
+            const view = statusView({
+                cpu: s.cpu.load,
+                memory: s.memory.percent,
+                warning: config.get('warningThreshold', 85),
+                style: config.get<StatusBarStyle>('statusBarStyle', 'full')
+            });
+            statusBar.text = view.text;
+            statusBar.tooltip = view.tooltip;
+            statusBar.backgroundColor = view.warn ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
         }),
         vscode.commands.registerCommand('nanometrics.focus', () =>
             vscode.commands.executeCommand(`${DashboardViewProvider.viewId}.focus`)),

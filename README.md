@@ -2,6 +2,8 @@
 
 ![Nano Metrics Logo](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/logo-full.png)
 
+![Claude Code session tracked live in Nano Metrics](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/claude_working.png)
+
 Explore and monitor system metrics effortlessly with this quick and convenient VSCode extension. Access real-time information on CPU load, memory usage, core load, and running instances of various services right from the side panel. Stay informed about your system's health and performance with ease.
 
 ![NanoMetrics panel in the Explorer](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/explorer.png)
@@ -13,13 +15,20 @@ Explore and monitor system metrics effortlessly with this quick and convenient V
 ## Features
 
 ### Claude Code activity tracking
+
+![Claude Code activity card](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/claude_activity.png)
+
+
 Watch your AI pair programmer work, without leaving the sidebar. The Project tab has a dedicated **Claude Code** window for every recent session in your workspace:
 - **Live status** - working or idle, with a pulse while Claude is actively writing
 - **What it's doing right now** - the current tool call (editing a file, running a command, searching...)
+- **Tokens and cost** - total tokens per session and an estimated cost from the transcript's usage data (prices are estimates, override with `nanometrics.claudePricing`)
 - **Progress tracking** - Claude's task plan with done/total, a progress bar and the active step highlighted
 - **Recent activity timeline** - the last actions, with timestamps
 - **Session stats** - tool calls made and files edited
 - Pairs with the process list, so you see what Claude's `claude`, dev servers and test runs cost in CPU and memory
+
+![Claude Code pricing card](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/claude_pricing.png)
 
 It reads Claude Code's local session transcripts (`~/.claude/projects`). Nothing is uploaded.
 
@@ -30,7 +39,7 @@ It reads Claude Code's local session transcripts (`~/.claude/projects`). Nothing
 - Per-core load heatmap and CPU temperature (where available)
 - Network throughput (download / upload) for the default interface
 - Disk and swap usage, battery and GPU info
-- Optional service monitoring: MySQL, Postgres, MongoDB, Redis, Docker, Nginx, Apache, Elasticsearch, RabbitMQ, Kafka, OracleDB, SQL Server
+- Optional service monitoring: MySQL, Postgres, MongoDB, Redis, Docker, Nginx, Apache, Elasticsearch, RabbitMQ, Kafka, OracleDB, SQL Server, Neo4j, Cassandra, MariaDB, CouchDB, InfluxDB, ClickHouse, Memcached, etcd, Consul, ZooKeeper, Prometheus, Grafana, MinIO, HAProxy, Traefik, Ollama
 
 ![System dashboard](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/image_dashboard.png)
 
@@ -70,6 +79,8 @@ See what your open project is costing you, right next to your code:
 | `nanometrics.showGraph` | `true` | Show history graphs |
 | `nanometrics.enableNetwork` / `enableDisk` | `true` | Network and disk sections |
 | `nanometrics.enableGpu` / `enableBattery` | `false` | GPU and battery sections |
+| `nanometrics.statusBarStyle` | `full` | `compact` shortens the status bar to e.g. `12·45%` |
+| `nanometrics.claudePricing` | `{}` | Override model prices (USD per 1M tokens) for the cost estimate |
 | `nanometrics.enable<Service>` | `false` | Monitor a background service |
 
 Process working directories and ports are read with `lsof` on macOS and `/proc` on Linux. On Windows the project monitor relies on terminals and command lines.
@@ -78,6 +89,13 @@ Process working directories and ports are read with `lsof` on macOS and `/proc` 
 ## Contribution
 
 Feel free to contribute to this project by reporting issues or submitting pull requests. Visit our [GitHub repository](https://github.com/nuhmanpk/nanometrics) to get involved. Your feedback and contributions mean a lot as we continue to enhance and improve Nano Metrics. This project is under active development, and your input is invaluable.
+
+## Sponsor
+
+If Nano Metrics helps you, consider supporting its development:
+
+- [GitHub Sponsors](https://github.com/sponsors/nuhmanpk)
+- [Buy Me a Coffee](https://buymeacoffee.com/nuhmanpk)
 
 ## License
 

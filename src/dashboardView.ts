@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { collectSystem, SystemOptions, SystemSnapshot } from './sysinfoMetrics';
 import { collectClaude, ClaudeSnapshot } from './claudeActivity';
+import { sanitizePricing } from './claudeUsage';
 import { collectProject, killProcessTree, ProjectSnapshot, readProjectInfo, ProjectInfo } from './projectMetrics';
 
 type Tab = 'system' | 'project';
@@ -20,7 +21,23 @@ const SERVICES: { setting: string; label: string; query: string }[] = [
     { setting: 'enableRabbitMQ', label: 'RabbitMQ', query: 'rabbitmq' },
     { setting: 'enableKafka', label: 'Kafka', query: 'kafka' },
     { setting: 'enableOracleDB', label: 'OracleDB', query: 'oracle' },
-    { setting: 'enableSqlServer', label: 'SQL Server', query: 'sqlservr' }
+    { setting: 'enableSqlServer', label: 'SQL Server', query: 'sqlservr' },
+    { setting: 'enableNeo4j', label: 'Neo4j', query: 'neo4j' },
+    { setting: 'enableCassandra', label: 'Cassandra', query: 'cassandra' },
+    { setting: 'enableMariaDB', label: 'MariaDB', query: 'mariadbd' },
+    { setting: 'enableCouchDB', label: 'CouchDB', query: 'couchdb' },
+    { setting: 'enableInfluxDB', label: 'InfluxDB', query: 'influxd' },
+    { setting: 'enableClickHouse', label: 'ClickHouse', query: 'clickhouse' },
+    { setting: 'enableMemcached', label: 'Memcached', query: 'memcached' },
+    { setting: 'enableEtcd', label: 'etcd', query: 'etcd' },
+    { setting: 'enableConsul', label: 'Consul', query: 'consul' },
+    { setting: 'enableZookeeper', label: 'ZooKeeper', query: 'zookeeper' },
+    { setting: 'enablePrometheus', label: 'Prometheus', query: 'prometheus' },
+    { setting: 'enableGrafana', label: 'Grafana', query: 'grafana' },
+    { setting: 'enableMinIO', label: 'MinIO', query: 'minio' },
+    { setting: 'enableHAProxy', label: 'HAProxy', query: 'haproxy' },
+    { setting: 'enableTraefik', label: 'Traefik', query: 'traefik' },
+    { setting: 'enableOllama', label: 'Ollama', query: 'ollama' }
 ];
 
 class Ring {
@@ -210,7 +227,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
                 this.lastProject = project;
                 this.post({ type: 'project', data: project, history: this.historyPayload() });
 
-                this.lastClaude = await collectClaude(folders);
+                this.lastClaude = await collectClaude(folders, sanitizePricing(vscode.workspace.getConfiguration('nanometrics').get('claudePricing')));
                 this.post({ type: 'claude', data: this.lastClaude });
             }
         } catch (err) {

@@ -4,7 +4,7 @@
   "icon": "images/logo.png",
   "publisher": "nuhmanpk",
   "description": "Explore and monitor system metrics effortlessly with this quick and convenient VSCode extension. Access real-time information on CPU load, memory usage, core load, and running instances of various services right from the side panel. Stay informed about your system's health and performance with ease.",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "engines": {
     "vscode": "^1.86.0"
   },
@@ -101,6 +101,32 @@
           "maximum": 100,
           "description": "Usage percentage at which CPU and memory are highlighted as a warning."
         },
+        "nanometrics.statusBarStyle": {
+          "type": "string",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "enumDescriptions": [
+            "CPU and memory with icons, e.g. 12%  45%.",
+            "Shortest form, e.g. 12·45%."
+          ],
+          "default": "full",
+          "description": "How much space the status bar item takes."
+        },
+        "nanometrics.claudePricing": {
+          "type": "object",
+          "default": {},
+          "description": "Override model prices (USD per million tokens) used for the Claude Code cost estimate. Keys match part of the model id, values are [input, output] or [input, output, cache read]; overrides are matched before the built-in prices. Example: { \"sonnet-5-5\": [2, 10, 0.1] }.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
         "nanometrics.showGraph": {
           "type": "boolean",
           "default": true,
@@ -166,6 +192,86 @@
           "default": false,
           "description": "Enable SQL Server metrics."
         },
+        "nanometrics.enableNeo4j": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Neo4j metrics."
+        },
+        "nanometrics.enableCassandra": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Cassandra metrics."
+        },
+        "nanometrics.enableMariaDB": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable MariaDB metrics."
+        },
+        "nanometrics.enableCouchDB": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable CouchDB metrics."
+        },
+        "nanometrics.enableInfluxDB": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable InfluxDB metrics."
+        },
+        "nanometrics.enableClickHouse": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable ClickHouse metrics."
+        },
+        "nanometrics.enableMemcached": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Memcached metrics."
+        },
+        "nanometrics.enableEtcd": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable etcd metrics."
+        },
+        "nanometrics.enableConsul": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Consul metrics."
+        },
+        "nanometrics.enableZookeeper": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable ZooKeeper metrics."
+        },
+        "nanometrics.enablePrometheus": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Prometheus metrics."
+        },
+        "nanometrics.enableGrafana": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Grafana metrics."
+        },
+        "nanometrics.enableMinIO": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable MinIO metrics."
+        },
+        "nanometrics.enableHAProxy": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable HAProxy metrics."
+        },
+        "nanometrics.enableTraefik": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Traefik metrics."
+        },
+        "nanometrics.enableOllama": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Ollama metrics."
+        },
         "nanometrics.enableGpu": {
           "type": "boolean",
           "default": false,
@@ -210,21 +316,27 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "test:unit": "mocha --ui tdd \"out/test/unit/**/*.test.js\""
   },
   "devDependencies": {
     "@types/mocha": "^10.0.6",
     "@types/node": "^20.19.17",
     "@types/vscode": "^1.86.0",
-    "@typescript-eslint/eslint-plugin": "^6.19.1",
-    "@typescript-eslint/parser": "^6.19.1",
+    "@typescript-eslint/eslint-plugin": "^8.72.0",
+    "@typescript-eslint/parser": "^8.72.0",
     "@vscode/test-cli": "^0.0.4",
     "@vscode/test-electron": "^2.3.9",
+    "@vscode/vsce": "^3.9.2",
     "eslint": "^8.56.0",
-    "typescript": "^5.3.3",
-    "vsce": "^2.15.0"
+    "mocha": "^10.8.2",
+    "typescript": "^5.3.3"
   },
   "dependencies": {
-    "systeminformation": "^5.27.10"
+    "systeminformation": "^5.33.16"
+  },
+  "overrides": {
+    "@azure/msal-node": "^7.1.1",
+    "serialize-javascript": "^7.1.4"
   }
 }

@@ -1,15 +1,19 @@
 import * as assert from 'assert';
-
-// You can import and use all API from the 'vscode' module
-// as well as import your extension to test it
 import * as vscode from 'vscode';
-// import * as myExtension from '../../extension';
 
-suite('Extension Test Suite', () => {
-	vscode.window.showInformationMessage('Start all tests.');
+suite('Extension', () => {
+	test('contributes its commands and settings', async () => {
+		const ext = vscode.extensions.getExtension('nuhmanpk.nanometrics');
+		assert.ok(ext, 'extension not found');
+		await ext.activate();
 
-	test('Sample test', () => {
-		assert.strictEqual(-1, [1, 2, 3].indexOf(5));
-		assert.strictEqual(-1, [1, 2, 3].indexOf(0));
+		const commands = await vscode.commands.getCommands(true);
+		for (const id of ['nanometrics.showSystem', 'nanometrics.showProject', 'nanometrics.togglePause']) {
+			assert.ok(commands.includes(id), `${id} not registered`);
+		}
+
+		const config = vscode.workspace.getConfiguration('nanometrics');
+		assert.strictEqual(config.get('statusBarStyle'), 'full');
+		assert.deepStrictEqual(config.get('claudePricing'), {});
 	});
 });

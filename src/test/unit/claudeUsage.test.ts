@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import {
-    costOf, formatCost, formatTokens, parseUsage, priceFor, sanitizePricing, totalTokens, UsageTracker
+    cacheSavingsOf, costOf, dayOf, formatCost, formatTokens, parseUsage, priceFor, sanitizePricing, totalTokens, UsageTracker
 } from '../../claudeUsage';
 
 const row = (id: string, usage: object, model = 'claude-sonnet-5-5') => ({
@@ -87,6 +87,42 @@ suite('claudeUsage', () => {
         assert.strictEqual(t.usage.output, 55);
     });
 
+    test('UsageTracker splits usage by model and day, and tracks cache savings once per message', () => {
+        const t = new UsageTracker();
+        const at = (id: string, model: string, timestamp: string, usage: object) =>
+            ({ type: 'assistant', timestamp, message: { id, model, usage } });
+        t.ingest(at('m1', 'claude-opus-5-5', '2026-10-30T10:00:00Z', { input_tokens: 1_000_000 }));
+        t.ingest(at('m1', 'claude-opus-5-5', '2026-10-30T10:00:01Z', { input_tokens: 1_000_000, cache_read_input_tokens: 1_000_000 }));
+        t.ingest(at('m2', 'claude-haiku-5-5', '2026-10-29T10:00:00Z', { input_tokens: 1_000_000 }));
+        assert.strictEqual(t.byModel.get('claude-opus-5-5')!.tokens, 2_000_000);
+        assert.ok(Math.abs(t.byModel.get('claude-opus-5-5')!.cost - 4.2) < 1e-9);
+        assert.strictEqual(t.byDay.get(dayOf('2026-10-30T10:00:00Z'))!.tokens, 2_000_000);
+        assert.strictEqual(t.byDay.get(dayOf('2026-10-29T10:00:00Z'))!.tokens, 1_000_000);
+        // 1M cache reads on Opus 5.5: $4 input minus $0.20 cache read.
+        assert.ok(Math.abs(t.saved - 3.8) < 1e-9);
+    });
+
+    test('addPerMinute buckets tokens by message time', () => {
+        const t = new UsageTracker();
+        const now = Date.parse('2026-10-30T12:00:30Z');
+        t.ingest({ type: 'assistant', timestamp: '2026-10-30T12:00:10Z', message: { id: 'a', model: 'claude-opus-5-5', usage: { input_tokens: 100 } } });
+        t.ingest({ type: 'assistant', timestamp: '2026-10-30T11:58:10Z', message: { id: 'b', model: 'claude-opus-5-5', usage: { input_tokens: 40 } } });
+        t.ingest({ type: 'assistant', timestamp: '2026-10-30T09:00:00Z', message: { id: 'c', model: 'claude-opus-5-5', usage: { input_tokens: 999 } } });
+        const rate = new Array<number>(5).fill(0);
+        t.addPerMinute(rate, now);
+        assert.deepStrictEqual(rate, [0, 0, 40, 0, 100]);
+    });
+
+    test('sanitizePricing ignores a __proto__ key', () => {
+        const table = sanitizePricing(JSON.parse('{"__proto__": [1, 2], "x": [3, 4]}'));
+        assert.strictEqual(Object.getPrototypeOf(table), Object.prototype);
+        assert.deepStrictEqual(table.x, [3, 4]);
+    });
+
+    test('cacheSavingsOf is null for unknown models', () => {
+        assert.strictEqual(cacheSavingsOf({ input: 0, output: 0, cacheRead: 10, cacheWrite5m: 0, cacheWrite1h: 0 }, 'mystery'), null);
+    });
+
     test('UsageTracker ignores non-assistant rows and rows without usage', () => {
         const t = new UsageTracker();
         t.ingest({ type: 'user', message: { usage: { input_tokens: 9 } } });
@@ -114,6 +150,8 @@ suite('claudeUsage', () => {
         assert.strictEqual(formatTokens(1500), '1.5k');
         assert.strictEqual(formatTokens(250_000), '250k');
         assert.strictEqual(formatTokens(2_400_000), '2.4M');
+        assert.strictEqual(formatTokens(1_250_000_000), '1.3B');
+        assert.strictEqual(formatTokens(42_000_000_000), '42B');
     });
 
     test('formatCost', () => {

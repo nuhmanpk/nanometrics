@@ -201,24 +201,117 @@
   // ---------- Claude Code window ----------
   const ago = (t) => {
     const s = Math.max(0, Math.round((Date.now() - t) / 1000));
-    return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ago`;
+    return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
   };
   const todoIcon = { completed: '✓', in_progress: '●', pending: '○' };
+  const CATS = [
+    ['read', 'Explore', 'var(--blue)'],
+    ['edit', 'Edit', 'var(--green)'],
+    ['run', 'Run', 'var(--orange)'],
+    ['web', 'Web', 'var(--purple)'],
+    ['agent', 'Agents', 'var(--yellow)'],
+    ['other', 'Other', 'var(--muted)']
+  ];
+  const catColor = Object.fromEntries(CATS.map(([k, , c]) => [k, c]));
+  const count = (n) => {
+    for (const [v, u] of [[1e9, 'B'], [1e6, 'M'], [1e3, 'k']]) {
+      if (n >= v) { return `${(n / v).toFixed(n >= v * 10 ? 0 : 1)}${u}`; }
+    }
+    return String(Math.round(n));
+  };
+  const toolTag = (s) => `<span class="tool" style="color:${catColor[s.cat] || 'var(--blue)'}">${esc(s.tool)}</span>`;
+
+  function statusOf(c) {
+    if (c.state === 'working') { return { cls: 'working', label: 'Working' }; }
+    if (c.state === 'waiting') {
+      return c.waitingOn === 'you' ? { cls: 'waiting', label: 'Your turn' } : { cls: 'waiting', label: `Waiting on ${c.waitingOn}` };
+    }
+    return { cls: '', label: 'Idle' };
+  }
+
+  /** Tool calls per minute, stacked by category, oldest on the left. */
+  function timeline(buckets) {
+    const W = 300, H = 34, n = buckets.length, gap = 2, bw = W / n - gap;
+    const totals = buckets.map((b) => CATS.reduce((sum, [k]) => sum + (b[k] || 0), 0));
+    const top = Math.max(1, ...totals);
+    const bars = buckets.map((b, i) => {
+      let y = H;
+      const x = (i * W) / n;
+      const rects = CATS.map(([k, , color]) => {
+        const v = b[k] || 0;
+        if (!v) { return ''; }
+        const h = Math.max(2, (v / top) * (H - 2));
+        y -= h;
+        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="1" fill="${color}"></rect>`;
+      }).join('');
+      const empty = totals[i] ? '' : `<rect x="${x.toFixed(1)}" y="${H - 2}" width="${bw.toFixed(1)}" height="2" rx="1" class="cc-empty"></rect>`;
+      return `<g><title>${n - i - 1 ? `${n - i - 1}m ago` : 'This minute'} · ${totals[i]} calls</title>${rects}${empty}</g>`;
+    }).join('');
+    return `<svg class="cc-timeline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${bars}</svg>`;
+  }
 
   function claudeSession(c, first) {
-    const working = c.state === 'working';
+    const st = statusOf(c);
     const done = c.todos.filter((t) => t.status === 'completed').length;
     const total = c.todos.length;
     const open = first || state.expanded.has(c.id);
     const cur = c.current;
+    const meta = [
+      `<span class="cc-state ${st.cls}">${esc(st.label)}</span>`,
+      ago(c.updated),
+      c.model ? esc(c.model) : '',
+      c.started ? `<span title="Session started ${esc(new Date(c.started).toLocaleTimeString())}">⏱ ${duration((c.updated - c.started) / 1000)}</span>` : '',
+      c.failedCalls ? `<span class="cc-err" title="Tool calls that returned an error">${c.failedCalls} failed</span>` : ''
+    ].filter(Boolean).join(' · ');
+
+    let now = '';
+    if (c.state === 'waiting') {
+      now = `<div class="cc-now waiting">${c.waitingOn === 'you'
+        ? '<span class="tool">Your turn</span><span class="detail">Claude finished — waiting for your next prompt</span>'
+        : `<span class="tool">${esc(c.waitingOn)}</span><span class="detail">Needs approval or is still running${cur && cur.tool === c.waitingOn ? ` · ${esc(cur.detail)}` : ''}</span>`}</div>`;
+    } else if (cur && c.state === 'working') {
+      now = `<div class="cc-now">${toolTag(cur)}<span class="detail" title="${esc(cur.detail)}">${esc(cur.detail)}</span></div>`;
+    }
+
+    const ctx = c.context
+      ? `<div class="cc-context" title="Prompt size of the latest request, including cached context"><div class="row-head"><span class="label">Context</span><span class="muted num">${esc(c.context.text)} · ${Math.round(c.context.percent)}%</span></div>${bar(c.context.percent, 'var(--blue)')}</div>`
+      : '';
+
     const progress = total
-      ? `<div class="cc-progress"><div class="row-head"><span class="label">Progress</span><span class="muted num">${done}/${total} tasks</span></div>
+      ? `<div class="cc-progress"><div class="row-head"><span class="label">Plan</span><span class="muted num">${done}/${total} tasks</span></div>
           <div class="bar"><div style="width:${(done / total) * 100}%;background:var(--green)"></div></div>
           <div class="cc-todos">${c.todos.map((t) => `<div class="cc-todo ${t.status}"><span class="ico">${todoIcon[t.status] || '○'}</span><span>${esc(t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content)}</span></div>`).join('')}</div>
         </div>`
       : '';
+
+    const mix = CATS.filter(([k]) => c.toolMix[k]).map(([k, label, color]) =>
+      `<span class="cc-mix"><span class="legend" style="background:${color}"></span>${label} <b class="num">${c.toolMix[k]}</b></span>`).join('');
+    const activity = c.toolCalls
+      ? `<div><div class="cc-label">Activity · last 30 min</div>${timeline(c.timeline)}<div class="cc-mixes">${mix}</div></div>`
+      : '';
+
+    const hot = c.hotFiles.length
+      ? `<div class="cc-label">Hot files</div><div class="cc-steps">${c.hotFiles.map((f) => {
+          const w = (f.edits / c.hotFiles[0].edits) * 100;
+          return `<button class="cc-file" data-action="openFile" data-path="${esc(f.path)}" title="Open ${esc(f.path)}"><span class="detail">${esc(f.name)}</span><span class="cc-heat"><span style="width:${w}%"></span></span><span class="muted num">${f.edits}×</span></button>`;
+        }).join('')}</div>`
+      : '';
+
+    const models = c.models.length
+      ? `<div><div class="cc-label">Models${c.cacheHit != null ? ` · cache ${Math.round(c.cacheHit)}% hit · saved ${esc(c.cacheSaved)}` : ''}</div>
+          <div class="cc-steps">${c.models.map((m) => `<div class="cc-model"><span class="detail">${esc(m.model)}</span><span class="cc-heat"><span style="width:${m.share}%;background:var(--purple)"></span></span><span class="muted num">${esc(m.tokens)} · ${esc(m.cost)}</span></div>`).join('')}</div></div>`
+      : '';
+    const research = c.research.length
+      ? `<div><div class="cc-label">Research · ${c.research.length}</div><div class="cc-steps">${c.research.map((r) => r.kind === 'fetch'
+          ? `<button class="cc-step cc-link-row" data-action="openLink" data-url="${esc(r.url)}" title="Open ${esc(r.url)}"><span class="cc-ico" style="color:var(--purple)">↗</span><span class="detail">${esc(r.text)}</span><span class="muted">${ago(r.time)}</span></button>`
+          : `<div class="cc-step"><span class="cc-ico" style="color:var(--purple)">⌕</span><span class="detail" title="${esc(r.text)}">${esc(r.text)}</span><span class="muted">${ago(r.time)}</span></div>`).join('')}</div></div>`
+      : '';
+    const errors = c.errors.length
+      ? `<div><div class="cc-label">Errors · ${c.failedCalls}</div><div class="cc-steps">${c.errors.map((e) => `<div class="cc-step"><span class="tool" style="color:var(--red)">${esc(e.tool)}</span><span class="detail" title="${esc(e.message)}">${esc(e.message)}</span><span class="muted">${ago(e.time)}</span></div>`).join('')}</div></div>`
+      : '';
+
     const steps = c.steps.length
-      ? `<div class="cc-steps">${c.steps.map((s) => `<div class="cc-step"><span class="tool">${esc(s.tool)}</span><span class="detail" title="${esc(s.detail)}">${esc(s.detail)}</span><span class="muted">${ago(s.time)}</span></div>`).join('')}</div>`
+      ? `<div class="cc-steps">${c.steps.map((s) => `<div class="cc-step">${toolTag(s)}<span class="detail" title="${esc(s.detail)}">${esc(s.detail)}</span><span class="muted">${ago(s.time)}</span></div>`).join('')}</div>`
       : '';
     const agents = c.agents || [];
     const running = agents.filter((a) => a.state === 'working').length;
@@ -226,32 +319,154 @@
       ? `<div class="cc-label">Agents · ${running ? `${running} running · ` : ''}${agents.length} total</div>
         <div class="cc-steps">${agents.slice(0, open ? agents.length : 3).map((a) => `<div class="cc-step"><span class="cc-pulse ${a.state === 'working' ? 'on' : ''}"></span><span class="detail" title="${esc(a.type)}">${esc(a.description)}</span><span class="muted num">${a.toolCalls} calls · ${esc(a.tokens)} · ${esc(a.cost)}</span></div>`).join('')}</div>`
       : '';
-    return `<div class="card cc-session ${working ? 'working' : ''}">
+    const lines = c.linesAdded || c.linesRemoved
+      ? `<span class="add">+${count(c.linesAdded)}</span> <span class="del">−${count(c.linesRemoved)}</span>`
+      : '0';
+
+    return `<div class="card cc-session ${st.cls}">
       <div class="cc-head" data-action="toggle" data-pid="${esc(c.id)}">
-        <span class="cc-pulse ${working ? 'on' : ''}"></span>
+        <span class="cc-pulse ${st.cls === 'working' ? 'on' : st.cls}"></span>
         <div class="proc-main">
-          <div class="proc-title"><span class="pname" title="${esc(c.title)}">${esc(c.title)}</span></div>
-          <div class="proc-cmd">${working ? 'Working' : 'Idle'} · ${ago(c.updated)}${c.model ? ` · ${esc(c.model)}` : ''}</div>
+          <div class="proc-title"><span class="pname" title="${esc(c.title)}">${esc(c.title)}</span>${c.folder && state.info.length > 1 ? `<span class="badge">${esc(c.folder)}</span>` : ''}</div>
+          <div class="proc-cmd">${meta}</div>
         </div>
+        <span class="twisty ${open ? 'down' : ''}">${chevron}</span>
       </div>
-      ${cur ? `<div class="cc-now"><span class="tool">${esc(cur.tool)}</span><span class="detail" title="${esc(cur.detail)}">${esc(cur.detail)}</span></div>` : ''}
-      ${progress}
+      ${c.prompt ? `<div class="cc-prompt" title="${esc(c.prompt)}">${esc(c.prompt)}</div>` : ''}
+      ${now}
+      ${ctx}
       <div class="stats cc-stats">
         <div class="stat"><div class="v num">${c.toolCalls}</div><div class="l">Tool calls</div></div>
         <div class="stat"><div class="v num">${c.filesTouched}</div><div class="l">Files edited</div></div>
+        <div class="stat" title="Lines written and replaced by edits"><div class="v num">${lines}</div><div class="l">Lines</div></div>
         <div class="stat" title="${esc(c.tokenDetail)}"><div class="v num">${esc(c.tokens)}</div><div class="l">Tokens</div></div>
-        <div class="stat" title="Estimated from token usage and model pricing"><div class="v num">${esc(c.cost)}</div><div class="l">Est. cost</div></div>
+        <div class="stat" title="Billing amount if this usage were paid through the Anthropic API"><div class="v num">${esc(c.cost)}</div><div class="l">Est. cost</div></div>
+        <div class="stat" title="Billing amount per hour if paid through the Anthropic API"><div class="v num">${esc(c.burnRate)}</div><div class="l">Burn rate</div></div>
       </div>
+      ${open ? activity : ''}
+      ${progress}
+      ${open ? models : ''}
+      ${open ? research : ''}
       ${agentList}
+      ${open ? hot : ''}
+      ${open ? errors : ''}
       ${open && steps ? `<div class="cc-label">Recent activity</div>${steps}` : ''}
     </div>`;
   }
 
+  // ---------- plan limits ----------
+  const limitColor = (v) => (v >= 90 ? 'var(--red)' : v >= 70 ? 'var(--yellow)' : 'var(--green)');
+
+  function resetText(t) {
+    if (!t) { return 'resets with your next message'; }
+    const mins = Math.max(0, Math.round((t - Date.now()) / 60000));
+    const d = new Date(t);
+    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const sameDay = d.toDateString() === new Date().toDateString();
+    const when = sameDay ? time : `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`;
+    const left = mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${Math.floor(mins / 1440)}d ${Math.floor((mins % 1440) / 60)}h`;
+    return `resets in ${left} · ${when}`;
+  }
+
+  function limitsView() {
+    const l = state.claude && state.claude.limits;
+    const link = '<button class="chip script" data-action="checkUsage" title="Open Claude Code with /usage filled in, to refresh these numbers">/usage</button>';
+    // Read from Claude Code's internal cache; when that isn't there or changed shape, leave the section out.
+    if (!l || !l.limits.length) { return ''; }
+    const rows = l.limits.map((x) => `<div title="${esc(x.label)}: ${Math.round(x.percent)}% used">
+        <div class="row-head"><span class="label">${esc(x.label)}</span><span class="muted num">${Math.round(x.percent)}% · ${esc(resetText(x.resetsAt))}</span></div>
+        <div class="bar"><div style="width:${Math.min(100, x.percent)}%;background:${limitColor(x.percent)}"></div></div>
+      </div>`).join('');
+    return section('Plan usage', `<div class="card rows cc-limits">${rows}<div class="cc-limits-actions"><span class="muted">Updated ${ago(l.updated)}</span>${link}</div></div>`);
+  }
+
+  function claudeTotals(c) {
+    const sessions = c ? c.sessions : [];
+    const costs = sessions.map((s) => s.costUsd).filter((v) => v != null);
+    return {
+      sessions,
+      working: sessions.filter((s) => s.state === 'working').length,
+      waiting: sessions.filter((s) => s.state === 'waiting').length,
+      cost: costs.length ? `$${costs.reduce((a, b) => a + b, 0).toFixed(2)}` : '—',
+      calls: sessions.reduce((n, s) => n + s.toolCalls, 0),
+      files: sessions.reduce((n, s) => n + s.filesTouched, 0)
+    };
+  }
+
   function claudeView() {
+    return limitsView() + claudeSessions();
+  }
+
+  function claudeSessions() {
+    if (!state.hasWorkspace) {
+      return `<div class="empty-state"><div class="title">No folder open</div>Open the folder you run Claude Code in to follow its sessions here.</div>`;
+    }
+    if (!state.claude) { return '<div class="skeleton" style="height:120px"></div>'; }
+    const t = claudeTotals(state.claude);
+    if (!t.sessions.length) {
+      const empty = `<div class="empty-state"><div class="title">No active Claude Code session</div>Run <span class="mono">claude</span> in this workspace. Live tool calls, context, cost and edited files show up here.</div>`;
+      return (state.claude.week && state.claude.week.some((d) => d.cost) ? weekView(t) : '') + empty + historyView();
+    }
+    const aside = [t.working ? `${t.working} working` : '', t.waiting ? `${t.waiting} waiting` : ''].filter(Boolean).join(' · ') || 'idle';
+    return weekView(t) + section('Sessions', t.sessions.map((s, i) => claudeSession(s, i === 0)).join(''), aside) + historyView();
+  }
+
+  const API_NOTE = 'Billing amount if this usage were paid through the Anthropic API';
+
+  /** Today at a glance, and spend per day over the last week. */
+  function weekView(t) {
     const c = state.claude;
-    if (!c || !c.sessions.length) { return ''; }
-    const live = c.sessions.filter((s) => s.state === 'working').length;
-    return section('Claude Code', c.sessions.map((s, i) => claudeSession(s, i === 0)).join(''), live ? `${live} working` : 'idle');
+    const week = c.week || [];
+    const top = Math.max(0.01, ...week.map((d) => d.cost));
+    const total = week.reduce((n, d) => n + d.cost, 0);
+    const bars = week.map((d) => `<div class="cc-day ${d.label === 'Today' ? 'today' : ''}" title="${esc(d.label)} · $${d.cost.toFixed(2)} · ${count(d.tokens)} tokens">
+        <span class="cc-day-cost num">${d.cost >= 0.01 ? `$${d.cost < 10 ? d.cost.toFixed(2) : Math.round(d.cost)}` : ''}</span>
+        <span class="cc-day-bar"><span style="height:${Math.max(d.cost ? 4 : 0, (d.cost / top) * 100)}%"></span></span>
+        <span class="cc-day-label">${esc(d.label)}</span>
+      </div>`).join('');
+    return `<div class="card cc-overview">
+      <div class="stats">
+        <div class="stat"><div class="v num">${t.working}<small class="muted"> / ${t.sessions.length}</small></div><div class="l">Working</div></div>
+        <div class="stat"><div class="v num ${t.waiting ? 'cc-attn' : ''}">${t.waiting}</div><div class="l">Waiting on you</div></div>
+        <div class="stat" title="${API_NOTE}"><div class="v num">${esc(c.today.cost)}</div><div class="l">Today · ${c.today.sessions} session${c.today.sessions === 1 ? '' : 's'}</div></div>
+      </div>
+      ${tokenGraph(c.tokenRate)}
+      ${week.length ? `<div class="cc-label cc-week-label"><span>Last 7 days</span><span class="num" title="${API_NOTE}">$${total.toFixed(2)}</span></div><div class="cc-week">${bars}</div>` : ''}
+    </div>`;
+  }
+
+  /** Tokens per minute over the last hour, drawn like the other history graphs. */
+  function tokenGraph(rate) {
+    if (!rate || !rate.some(Boolean) || !state.showGraph) { return ''; }
+    const total = rate.reduce((a, b) => a + b, 0);
+    const now = rate[rate.length - 1];
+    return `<div class="cc-label cc-week-label"><span>Tokens · last hour</span><span class="num" title="${count(now)} tokens this minute">${esc(count(total))}</span></div>
+      <div class="cc-rate" title="Tokens per minute, including cached context">${spark([{ values: rate, color: 'var(--blue)' }], { height: 40 })}</div>`;
+  }
+
+  /** Earlier sessions in this workspace, each one resumable in a terminal. */
+  function historyView() {
+    const h = (state.claude && state.claude.history) || [];
+    if (!h.length) { return ''; }
+    const rows = h.map((p) => `<div class="cc-past">
+        <div class="proc-main"><div class="pname" title="${esc(p.title)}">${esc(p.title)}</div><div class="proc-cmd">${ago(p.updated)} · ${esc(p.tokens)} tokens · ${esc(p.cost)}</div></div>
+        <button class="chip script" data-action="resume" data-id="${esc(p.id)}" title="Run claude --resume in a new terminal">Resume</button>
+      </div>`).join('');
+    return section('Past sessions', `<div class="card cc-history">${rows}</div>`, 'last 7 days');
+  }
+
+  /** One line on the Project tab pointing at the Claude tab. */
+  function claudeLink() {
+    const t = claudeTotals(state.claude);
+    if (!t.sessions.length) { return ''; }
+    const s = t.sessions[0];
+    const st = statusOf(s);
+    const what = s.state === 'working' && s.current ? `${esc(s.current.tool)} · ${esc(s.current.detail)}` : esc(s.title);
+    return `<button class="card cc-link ${st.cls}" data-action="tab" data-tab="claude" title="Open the Claude tab">
+      <span class="cc-pulse ${st.cls === 'working' ? 'on' : st.cls}"></span>
+      <span class="cc-link-main"><b>Claude Code</b> <span class="cc-state ${st.cls}">${esc(st.label)}</span><span class="detail">${what}</span></span>
+      <span class="muted num" title="Billing amount if this usage were paid through the Anthropic API">${t.cost}</span>${chevron}
+    </button>`;
   }
 
   function projectView() {
@@ -278,7 +493,7 @@
       ${spark([{ values: h.projectCpu, color: 'var(--blue)' }])}
     </div>`;
 
-    out += claudeView();
+    out += claudeLink();
 
     if (p.ports.length) {
       const chips = p.ports.map((x) => `<button class="chip" data-action="openPort" data-port="${x.port}" title="${esc(x.name)} (PID ${x.pid}) — open in browser"><span class="dot" style="background:var(--green)"></span><span class="mono">localhost:${x.port}</span><span class="meta">${esc(x.name)}</span></button>`).join('');
@@ -372,6 +587,23 @@
         history: [{ values: h.projectCpu, color: 'var(--blue)' }],
         title: `${name}${branch ? ` (${branch})` : ''}\n${running} running · ${p.processCount} processes · ${bytes(p.memRss)}\nClick to open project monitor` }));
     }
+    const lim = state.claude && state.claude.limits && state.claude.limits.limits;
+    if (lim && lim.length) {
+      const first = lim[0];
+      rows.push(mrow({ label: 'LIM', value: `${Math.round(first.percent)}%`, color: limitColor(first.percent), percent: first.percent, tab: 'claude',
+        title: lim.map((x) => `${x.label}: ${Math.round(x.percent)}% · ${resetText(x.resetsAt)}`).join('\n') }));
+    }
+    const t = claudeTotals(state.claude);
+    if (state.hasWorkspace && t.sessions.length) {
+      const c = t.sessions[0];
+      const st = statusOf(c);
+      const color = st.cls === 'working' ? 'var(--green)' : st.cls === 'waiting' ? 'var(--yellow)' : 'var(--muted)';
+      const text = c.state === 'working' && c.current
+        ? `<b style="color:${catColor[c.current.cat] || 'inherit'}">${esc(c.current.tool)}</b> ${esc(c.current.detail)}`
+        : `<b style="color:${color}">${esc(st.label)}</b> ${esc(c.title)}`;
+      rows.push(mrow({ label: 'CC', value: t.cost, color, tab: 'claude', text,
+        title: `Claude Code · ${st.label}\n${c.title}\n${c.toolCalls} tool calls · ${c.filesTouched} files · ${c.tokens} tokens · ${c.cost} (API billing)${c.context ? `\nContext ${c.context.text}` : ''}\nClick to open Claude activity` }));
+    }
     return rows.join('');
   }
 
@@ -392,6 +624,12 @@
     return el;
   }
 
+  // Live dot on the tab, so a session waiting on you is noticed from the other tabs.
+  function claudeBadge() {
+    const t = claudeTotals(state.claude);
+    return t.waiting ? '<span class="tab-dot waiting"></span>' : t.working ? '<span class="tab-dot"></span>' : '';
+  }
+
   function render() {
     if (compact) {
       region('compact', compactView());
@@ -401,11 +639,13 @@
       <div class="tabs" role="tablist">
         <button class="tab ${state.tab === 'system' ? 'active' : ''}" role="tab" aria-selected="${state.tab === 'system'}" data-action="tab" data-tab="system">System</button>
         <button class="tab ${state.tab === 'project' ? 'active' : ''}" role="tab" aria-selected="${state.tab === 'project'}" data-action="tab" data-tab="project">Project</button>
+        <button class="tab ${state.tab === 'claude' ? 'active' : ''}" role="tab" aria-selected="${state.tab === 'claude'}" data-action="tab" data-tab="claude">Claude${claudeBadge()}</button>
       </div>
       <button class="live ${state.paused ? 'paused' : ''}" data-action="pause" title="${state.paused ? 'Resume' : 'Pause'} monitoring"><span class="dot"></span>${state.paused ? 'Paused' : 'Live'}</button>
     </div>${state.error ? `<div class="error">${esc(state.error)}</div>` : ''}`);
     region('system', systemView()).hidden = state.tab !== 'system';
     region('project', state.tab === 'project' ? projectView() : '').hidden = state.tab !== 'project';
+    region('claude', state.tab === 'claude' ? claudeView() : '').hidden = state.tab !== 'claude';
   }
 
   function persist() {
@@ -448,6 +688,18 @@
         return;
       case 'runScript':
         vscode.postMessage({ type: 'runScript', folder: d.folder, script: d.script });
+        return;
+      case 'checkUsage':
+        vscode.postMessage({ type: 'checkUsage' });
+        return;
+      case 'openLink':
+        vscode.postMessage({ type: 'openLink', url: d.url });
+        return;
+      case 'resume':
+        vscode.postMessage({ type: 'resume', id: d.id });
+        return;
+      case 'openFile':
+        vscode.postMessage({ type: 'openFile', path: d.path });
         return;
       case 'showTerminal':
         e.stopPropagation();

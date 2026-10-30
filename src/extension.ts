@@ -49,6 +49,10 @@ export function activate(context: vscode.ExtensionContext) {
             await vscode.commands.executeCommand(`${DashboardViewProvider.viewId}.focus`);
             dashboard.showTab('project');
         }),
+        vscode.commands.registerCommand('nanometrics.showClaude', async () => {
+            await vscode.commands.executeCommand(`${DashboardViewProvider.viewId}.focus`);
+            dashboard.showTab('claude');
+        }),
         vscode.commands.registerCommand('nanometrics.showSystem', async () => {
             await vscode.commands.executeCommand(`${DashboardViewProvider.viewId}.focus`);
             dashboard.showTab('system');

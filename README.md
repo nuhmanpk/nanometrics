@@ -38,15 +38,13 @@
 
 ----
 
-![Claude Code session tracked live in Nano Metrics](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/claude_working.png)
-
 Explore and monitor system metrics effortlessly with this quick and convenient VSCode extension. Access real-time information on CPU load, memory usage, core load, and running instances of various services right from the side panel. Stay informed about your system's health and performance with ease.
 
 ![NanoMetrics panel in the Explorer](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/explorer.png)
 
 <p align="center">
   <a href="https://www.producthunt.com/products/nano-metrics?utm_source=badge-follow&utm_medium=badge&utm_source=badge-nano&#0045;metrics" target="_blank">
-    <img src="https://api.producthunt.com/widgets/embed-image/v1/follow.svg?product_id=1357538&theme=light" alt="Nano Metrics on Product Hunt" width="250" height="54">
+    <img src="https://img.shields.io/badge/Product%20Hunt-Follow%20Nano%20Metrics-DA552F?style=for-the-badge&logo=producthunt&logoColor=white" alt="Nano Metrics on Product Hunt">
   </a>
 </p>
 
@@ -55,24 +53,28 @@ Explore and monitor system metrics effortlessly with this quick and convenient V
 
 ### Claude Code activity tracking
 
-![Claude Code activity card](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/claude_activity.png)
+![Claude Code session in the Claude tab](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/claude_session.png)
 
-
-Watch your AI pair programmer work, without leaving the sidebar. The Project tab has a dedicated **Claude Code** window for every recent session in your workspace:
-- **Live status** - working or idle, with a pulse while Claude is actively writing
-- **What it's doing right now** - the current tool call (editing a file, running a command, searching...)
-- **Tokens and cost** - total tokens per session and an estimated cost from the transcript's usage data (prices are estimates, override with `nanometrics.claudePricing`)
-- **Subagents and workflows** - every agent the session spawns (Task/Agent calls and workflow agents) listed with running/done status, tool calls, tokens and cost; their usage is included in the session totals
-- **Progress tracking** - Claude's task plan with done/total, a progress bar and the active step highlighted
-- **Recent activity timeline** - the last actions, with timestamps
-- **Session stats** - tool calls made and files edited
-- Pairs with the process list, so you see what Claude's `claude`, dev servers and test runs cost in CPU and memory
-
-![Claude Code pricing card](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/claude_pricing.png)
+Watch your AI pair programmer work, without leaving the sidebar. The **Claude** tab follows every recent Claude Code session in your workspace:
+- **Live status** - Working, **Your turn** (Claude finished and waits for your prompt), **Waiting on a tool** (a permission prompt or a long run) or Idle. The tab shows a dot when a session needs you, so you notice from any tab
+- **What it's doing right now** - the current tool call, and the last prompt you sent
+- **Context meter** - how full the context window was on the latest request
+- **Tokens, cost and burn rate** - total tokens, the estimated cost (what the usage would be billed through the Anthropic API) and $/hr. Override prices with `nanometrics.claudePricing`
+- **Code stats** - tool calls, files edited, lines added / removed and failed tool calls
+- **Activity chart** - tool calls per minute over the last 30 minutes, coloured by kind (explore, edit, run, web, agents)
+- **Hot files** - the most edited files, click to open
+- **Subagents and workflows** - every agent the session spawns, with running/done status, tool calls, tokens and cost; their usage is included in the session totals
+- **Plan progress and recent activity** - Claude's task list with done/total, and the last actions with timestamps
+- **Research trail** - every web search Claude ran and page it fetched (click to open the page)
+- **Models and cache** - tokens and cost per model when you switch models, plus the cache hit rate and how much caching saved
+- **Errors** - failed tool calls with their error message
+- **Token graph** - tokens per minute over the last hour, across every session in the workspace
+- **Last 7 days** - estimated spend per day in this workspace, and today's total
+- **Past sessions** - the last week's sessions with their cost; **Resume** opens a terminal with `claude --resume`
+- **Plan usage** - your Claude plan's 5-hour and weekly limits as bars, with the time each one resets: the same numbers as `/usage` in Claude Code, read from Claude Code's local cache. No setup. The **/usage** button opens Claude Code with `/usage` filled in to refresh them
+- A **CC** row in the Explorer panel and a summary line on the Project tab show what Claude is doing at a glance
 
 It reads Claude Code's local session transcripts (`~/.claude/projects`). Nothing is uploaded.
-
-![Project dashboard with Claude Code tracking](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/image_project_dashboard.png)
 
 ### System dashboard
 - Live CPU and memory gauges with history graphs
@@ -92,7 +94,7 @@ See what your open project is costing you, right next to your code:
 - Git branch and one-click `package.json` scripts (npm, yarn, pnpm or bun)
 
 ### Everywhere else
-- Compact **NanoMetrics** panel in the Explorer — CPU, memory, temperature (macOS), network and project at a glance
+- Compact **NanoMetrics** panel in the Explorer — CPU, memory, temperature (macOS), network, project and Claude Code at a glance
 
 - CPU and memory in the status bar, highlighted when usage crosses your warning threshold
 - Uses your VS Code theme colors, light or dark
@@ -107,7 +109,7 @@ See what your open project is costing you, right next to your code:
 ## Usage
 
 1. Click the Nano Metrics icon in the Activity Bar for the full dashboard, or use the **NanoMetrics** panel in the Explorer
-2. Switch between the **System** and **Project** tabs
+2. Switch between the **System**, **Project** and **Claude** tabs
 3. Click the status bar item to jump to the dashboard
 4. Search for "Nano Metrics" in VS Code settings to tune it
 
@@ -125,6 +127,23 @@ See what your open project is costing you, right next to your code:
 
 Process working directories and ports are read with `lsof` on macOS and `/proc` on Linux. On Windows the project monitor relies on terminals and command lines.
 
+
+## Privacy and open source
+
+Nano Metrics runs entirely on your machine. **Nothing is sent anywhere**: no telemetry, no analytics, no account, no server. The extension makes no network requests at all.
+
+What it reads, locally:
+- System stats (CPU, memory, disks, network, battery, GPU) from your operating system
+- Processes, working directories and listening ports (`ps`, `lsof` on macOS, `/proc` on Linux)
+- Your workspace's `package.json` scripts and current git branch
+- Claude Code's session transcripts in `~/.claude/projects`, read only, to show what Claude is doing, tokens and estimated cost
+- The plan limits Claude Code last saved for `/usage` in `~/.claude.json`, read only. Nano Metrics never reads your login token and never asks Anthropic for anything
+
+What it writes: nothing. It doesn't change your Claude Code settings or any of your files.
+
+Links open in your browser only when you click them: `localhost` ports, the claude.ai usage page (only if the Claude Code extension isn't installed) and GitHub. The **/usage** button hands `/usage` to Claude Code, which then checks your limits itself.
+
+The code is open source under the MIT License. Don't take our word for it: read every line on [GitHub](https://github.com/nuhmanpk/nanometrics), and build the extension from source if you prefer.
 
 ## Contribution
 

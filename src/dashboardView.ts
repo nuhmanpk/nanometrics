@@ -1,11 +1,17 @@
 import * as vscode from 'vscode';
+import * as crypto from 'crypto';
 import * as path from 'path';
 import { collectSystem, SystemOptions, SystemSnapshot } from './sysinfoMetrics';
 import { collectClaude, ClaudeSnapshot } from './claudeActivity';
 import { sanitizePricing } from './claudeUsage';
-import { collectProject, killProcessTree, ProjectSnapshot, readProjectInfo, ProjectInfo } from './projectMetrics';
+import { readLimits, USAGE_URL } from './claudeLimits';
+import {
+    collectProject, containsPid, isSafeScriptName, killProcessTree, ProjectSnapshot, readProjectInfo, ProjectInfo
+} from './projectMetrics';
 
-type Tab = 'system' | 'project';
+type Tab = 'system' | 'project' | 'claude';
+const TABS: Tab[] = ['system', 'project', 'claude'];
+const asTab = (t: unknown): Tab => (TABS.includes(t as Tab) ? t as Tab : 'system');
 
 const HISTORY = 60;
 
@@ -214,8 +220,8 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
             }
 
             // Project scans are heavier (process table + lsof), so only run them when someone is looking.
+            const folders = (vscode.workspace.workspaceFolders ?? []).filter(f => f.uri.scheme === 'file').map(f => f.uri.fsPath);
             if ((this.visible('full') && this.tab === 'project') || this.visible('compact')) {
-                const folders = (vscode.workspace.workspaceFolders ?? []).filter(f => f.uri.scheme === 'file').map(f => f.uri.fsPath);
                 const project = await collectProject({
                     folders,
                     terminals: await this.terminalPids(),
@@ -226,8 +232,13 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
                 this.history.projectMem.push(project.memRss);
                 this.lastProject = project;
                 this.post({ type: 'project', data: project, history: this.historyPayload() });
-
-                this.lastClaude = await collectClaude(folders, sanitizePricing(vscode.workspace.getConfiguration('nanometrics').get('claudePricing')));
+            }
+            if ((this.visible('full') && this.tab !== 'system') || this.visible('compact')) {
+                const [claude, limits] = await Promise.all([
+                    collectClaude(folders, sanitizePricing(vscode.workspace.getConfiguration('nanometrics').get('claudePricing'))),
+                    readLimits()
+                ]);
+                this.lastClaude = { ...claude, limits };
                 this.post({ type: 'claude', data: this.lastClaude });
             }
         } catch (err) {
@@ -278,7 +289,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
                 this.tick();
                 break;
             case 'tab':
-                this.tab = msg.tab === 'project' ? 'project' : 'system';
+                this.tab = asTab(msg.tab);
                 this.tick();
                 break;
             case 'pause':
@@ -286,7 +297,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
                 break;
             case 'open':
                 await vscode.commands.executeCommand(`${DashboardViewProvider.viewId}.focus`);
-                this.showTab(msg.tab === 'project' ? 'project' : 'system');
+                this.showTab(asTab(msg.tab));
                 break;
             case 'settings':
                 vscode.commands.executeCommand('workbench.action.openSettings', '@ext:nuhmanpk.nanometrics');
@@ -296,6 +307,9 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
                 break;
             case 'kill': {
                 const pid = Number(msg.pid);
+                if (!containsPid(this.lastProject, pid)) {
+                    return;
+                }
                 const choice = await vscode.window.showWarningMessage(
                     `Stop "${msg.name}" (PID ${pid}) and its child processes?`,
                     { modal: true },
@@ -309,13 +323,47 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
             }
             case 'runScript': {
                 const info = this.projectInfo.find(i => i.folder === msg.folder);
-                if (!info || !info.scripts.includes(msg.script)) {
+                if (!info || !info.scripts.includes(msg.script) || !isSafeScriptName(msg.script)) {
                     return;
                 }
                 const pm = info.packageManager ?? 'npm';
                 const terminal = vscode.window.createTerminal({ name: `${info.name}: ${msg.script}`, cwd: info.folder });
                 terminal.show();
                 terminal.sendText(`${pm} run ${msg.script}`);
+                break;
+            }
+            case 'checkUsage':
+                // Claude Code's deep link opens a session with the prompt filled in; without the extension, use claude.ai.
+                if (vscode.extensions.getExtension('anthropic.claude-code')) {
+                    vscode.env.openExternal(vscode.Uri.parse(`${vscode.env.uriScheme}://anthropic.claude-code/open?prompt=${encodeURIComponent('/usage')}`));
+                } else {
+                    vscode.env.openExternal(vscode.Uri.parse(USAGE_URL));
+                }
+                break;
+            case 'openLink': {
+                // Only pages Claude fetched in a listed session.
+                const known = this.lastClaude?.sessions.some(s => s.research.some(r => r.url && r.url === msg.url));
+                if (known) {
+                    vscode.env.openExternal(vscode.Uri.parse(msg.url));
+                }
+                break;
+            }
+            case 'resume': {
+                const past = this.lastClaude?.history.find(h => h.id === msg.id);
+                if (!past || !/^[\w-]+$/.test(past.id)) {
+                    return;
+                }
+                const terminal = vscode.window.createTerminal({ name: `Claude: ${past.title}`, cwd: past.cwd });
+                terminal.show();
+                terminal.sendText(`claude --resume ${past.id}`);
+                break;
+            }
+            case 'openFile': {
+                // Only files the dashboard listed, so the webview can't open arbitrary paths.
+                const known = this.lastClaude?.sessions.some(s => s.hotFiles.some(f => f.path === msg.path));
+                if (known) {
+                    vscode.window.showTextDocument(vscode.Uri.file(msg.path), { preview: true });
+                }
                 break;
             }
             case 'showTerminal': {
@@ -333,7 +381,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
     }
 
     private html(webview: vscode.Webview, media: vscode.Uri, mode: 'full' | 'compact'): string {
-        const nonce = [...Array(32)].map(() => Math.floor(Math.random() * 36).toString(36)).join('');
+        const nonce = crypto.randomBytes(16).toString('base64');
         const css = webview.asWebviewUri(vscode.Uri.joinPath(media, 'dashboard.css'));
         const js = webview.asWebviewUri(vscode.Uri.joinPath(media, 'dashboard.js'));
         return `<!DOCTYPE html>

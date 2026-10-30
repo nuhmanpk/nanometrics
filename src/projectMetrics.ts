@@ -257,7 +257,21 @@ export async function collectProject(ctx: ProjectContext): Promise<ProjectSnapsh
 }
 
 /** Terminates a process and everything it spawned, children first. */
+export function isSafeScriptName(name: string): boolean {
+  return /^[\w:.@/+-]+$/.test(name) && !name.startsWith('-');
+}
+
+/** True when `pid` is one of the processes in the snapshot, so the dashboard can't be asked to stop anything else. */
+export function containsPid(snapshot: ProjectSnapshot | undefined, pid: number): boolean {
+  const walk = (nodes: ProjectProcess[]): boolean => nodes.some(n => n.pid === pid || walk(n.children));
+  return Number.isInteger(pid) && pid > 1 && !!snapshot && walk(snapshot.roots);
+}
+
 export async function killProcessTree(pid: number): Promise<void> {
+  // 0 and negative pids address process groups (or every process) in kill(2).
+  if (!Number.isInteger(pid) || pid <= 1) {
+    return;
+  }
   if (process.platform === 'win32') {
     await run('taskkill', ['/pid', String(pid), '/T', '/F']);
     return;
@@ -309,7 +323,8 @@ export async function readProjectInfo(folder: string): Promise<ProjectInfo> {
   let packageManager: ProjectInfo['packageManager'] = null;
   try {
     const pkg = JSON.parse(await fs.readFile(path.join(folder, 'package.json'), 'utf8'));
-    scripts = Object.keys(pkg.scripts ?? {});
+    // Script names go into a terminal command line, so only plain names are offered.
+    scripts = Object.keys(pkg.scripts ?? {}).filter(isSafeScriptName);
     const pm = String(pkg.packageManager ?? '').split('@')[0];
     if (pm === 'yarn' || pm === 'pnpm' || pm === 'bun' || pm === 'npm') {
       packageManager = pm;

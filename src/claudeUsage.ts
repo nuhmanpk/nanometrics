@@ -110,12 +110,25 @@ export function costOf(u: TokenUsage, model: string, table: PriceTable = DEFAULT
   ) / 1_000_000;
 }
 
+/** What cache reads saved compared with paying the full input price for the same tokens, or null when unpriced. */
+export function cacheSavingsOf(u: TokenUsage, model: string, table: PriceTable = DEFAULT_PRICING): number | null {
+  const found = match(model, table);
+  if (!found) {
+    return null;
+  }
+  const [key, [inPrice, , readPrice = inPrice * CACHE_READ]] = found;
+  const prompt = u.input + u.cacheRead + u.cacheWrite5m + u.cacheWrite1h;
+  const factor = key === LONG_PROMPT.key && prompt > LONG_PROMPT.threshold ? LONG_PROMPT.factor : 1;
+  return factor * u.cacheRead * Math.max(0, inPrice - readPrice) / 1_000_000;
+}
+
 /** Accepts only well formed overrides, so a bad setting can't break the dashboard. Overrides are matched first. */
 export function sanitizePricing(raw: unknown): PriceTable {
   const overrides: PriceTable = {};
   if (raw && typeof raw === 'object') {
     for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
       if (
+        key !== '__proto__' &&
         Array.isArray(value) &&
         (value.length === 2 || value.length === 3) &&
         value.every(v => typeof v === 'number' && v >= 0)
@@ -127,9 +140,38 @@ export function sanitizePricing(raw: unknown): PriceTable {
   return { ...overrides, ...Object.fromEntries(Object.entries(DEFAULT_PRICING).filter(([k]) => !(k in overrides))) };
 }
 
+export interface UsageBucket {
+  tokens: number;
+  cost: number;
+}
+
 interface Counted {
   usage: TokenUsage;
   cost: number | null;
+  saved: number;
+  model: string;
+  day: string;
+  time: number;
+}
+
+/** Local calendar day of an ISO timestamp, e.g. 2026-10-30, or '' when there is none. */
+export function dayOf(timestamp: unknown): string {
+  const t = typeof timestamp === 'string' ? Date.parse(timestamp) : NaN;
+  if (!Number.isFinite(t)) {
+    return '';
+  }
+  const d = new Date(t);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function bump(map: Map<string, UsageBucket>, key: string, tokens: number, cost: number) {
+  if (!key) {
+    return;
+  }
+  const b = map.get(key) ?? { tokens: 0, cost: 0 };
+  b.tokens += tokens;
+  b.cost += cost;
+  map.set(key, b);
 }
 
 /**
@@ -139,6 +181,10 @@ interface Counted {
 export class UsageTracker {
   readonly usage = emptyUsage();
   cost: number | null = null;
+  // What prompt caching saved, and usage split by model and by local day.
+  saved = 0;
+  readonly byModel = new Map<string, UsageBucket>();
+  readonly byDay = new Map<string, UsageBucket>();
   private seen = new Map<string, Counted>();
   private priced = false;
 
@@ -164,15 +210,37 @@ export class UsageTracker {
       if (previous.cost !== null) {
         this.cost = (this.cost ?? 0) - previous.cost;
       }
+      this.saved -= previous.saved;
+      bump(this.byModel, previous.model, -totalTokens(previous.usage), -(previous.cost ?? 0));
+      bump(this.byDay, previous.day, -totalTokens(previous.usage), -(previous.cost ?? 0));
     }
-    const cost = costOf(usage, String(msg.model ?? ''), this.pricing);
+    const model = String(msg.model ?? '');
+    const cost = costOf(usage, model, this.pricing);
+    const saved = cacheSavingsOf(usage, model, this.pricing) ?? 0;
+    // A previous row's day wins, so a message split over midnight stays on one day.
+    const day = previous?.day || dayOf(row.timestamp);
+    const time = previous?.time || Date.parse(row?.timestamp) || 0;
     addUsage(this.usage, usage);
     if (cost !== null) {
       this.cost = (this.cost ?? 0) + cost;
       this.priced = true;
     }
+    this.saved += saved;
+    bump(this.byModel, model, totalTokens(usage), cost ?? 0);
+    bump(this.byDay, day, totalTokens(usage), cost ?? 0);
     if (id) {
-      this.seen.set(id, { usage, cost });
+      this.seen.set(id, { usage, cost, saved, model, day, time });
+    }
+  }
+
+  /** Adds tokens per minute over the last `into.length` minutes to `into`, oldest first. */
+  addPerMinute(into: number[], now: number): void {
+    const n = into.length;
+    for (const c of this.seen.values()) {
+      const age = Math.floor((now - c.time) / 60_000);
+      if (c.time && age >= 0 && age < n) {
+        into[n - 1 - age] += totalTokens(c.usage);
+      }
     }
   }
 
@@ -183,6 +251,9 @@ export class UsageTracker {
 }
 
 export function formatTokens(n: number): string {
+  if (n >= 1_000_000_000) {
+    return `${(n / 1_000_000_000).toFixed(n >= 10_000_000_000 ? 0 : 1)}B`;
+  }
   if (n >= 1_000_000) {
     return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
   }

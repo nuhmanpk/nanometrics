@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { collectClaude } from '../../claudeActivity';
+import { categoryOf, collectClaude } from '../../claudeActivity';
 
 suite('claudeActivity', () => {
     let home: string;
@@ -104,6 +104,122 @@ suite('claudeActivity', () => {
         assert.strictEqual(a.description, 'Build chapter');
         assert.strictEqual(a.tokens, '2.0k');
         assert.strictEqual(a.state, 'working');
+    });
+
+    test('counts lines, failed calls, hot files, tool mix, context and the last prompt', async () => {
+        const lines = [
+            JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: 'Add a login page' } }),
+            assistant('m1', { input_tokens: 10, cache_read_input_tokens: 40_000 }, [
+                { type: 'tool_use', id: 't1', name: 'Edit', input: { file_path: '/work/demo-app/a.ts', old_string: 'a\nb', new_string: 'a\nb\nc' } },
+                { type: 'tool_use', id: 't2', name: 'Write', input: { file_path: '/work/demo-app/b.ts', content: 'x\ny' } },
+                { type: 'tool_use', id: 't3', name: 'Edit', input: { file_path: '/work/demo-app/a.ts', old_string: 'z', new_string: '' } },
+                { type: 'tool_use', id: 't4', name: 'Grep', input: { pattern: 'login' } }
+            ]),
+            JSON.stringify({ type: 'user', message: { role: 'user', content: [
+                { type: 'tool_result', tool_use_id: 't1' },
+                { type: 'tool_result', tool_use_id: 't2' },
+                { type: 'tool_result', tool_use_id: 't3', is_error: true },
+                { type: 'tool_result', tool_use_id: 't4' }
+            ] } })
+        ];
+        await fs.writeFile(transcript, lines.join('\n') + '\n');
+
+        const s = (await collectClaude([folder])).sessions[0];
+        assert.strictEqual(s.state, 'working');
+        assert.strictEqual(s.prompt, 'Add a login page');
+        assert.strictEqual(s.linesAdded, 5);
+        assert.strictEqual(s.linesRemoved, 3);
+        assert.strictEqual(s.failedCalls, 1);
+        assert.deepStrictEqual(s.hotFiles.map(f => [f.name, f.edits]), [['a.ts', 2], ['b.ts', 1]]);
+        assert.strictEqual(s.toolMix.edit, 3);
+        assert.strictEqual(s.toolMix.read, 1);
+        assert.strictEqual(s.timeline[s.timeline.length - 1].edit, 3);
+        assert.strictEqual(s.context?.used, 40_010);
+        // Sonnet 5.5 has a 1M window.
+        assert.strictEqual(s.context?.limit, 1_000_000);
+    });
+
+    test('context window follows the model of the latest request', async () => {
+        const row = (id: string, model: string) => JSON.stringify({
+            type: 'assistant',
+            timestamp: new Date().toISOString(),
+            message: { id, model, usage: { input_tokens: 50_000 }, content: [] }
+        });
+        await fs.writeFile(transcript, row('m1', 'claude-haiku-4-5') + '\n');
+        assert.strictEqual((await collectClaude([folder])).sessions[0].context?.limit, 200_000);
+
+        await fs.appendFile(transcript, row('m2', 'claude-opus-5-5') + '\n');
+        assert.strictEqual((await collectClaude([folder])).sessions[0].context?.limit, 1_000_000);
+    });
+
+    test('reports waiting on the user after a reply and on a tool left without a result', async () => {
+        const quiet = async () => {
+            const t = new Date(Date.now() - 60_000);
+            await fs.utimes(transcript, t, t);
+        };
+        await fs.writeFile(transcript, assistant('m1', { input_tokens: 10 }, [{ type: 'text', text: 'Done.' }]) + '\n');
+        await quiet();
+        let s = (await collectClaude([folder])).sessions[0];
+        assert.strictEqual(s.state, 'waiting');
+        assert.strictEqual(s.waitingOn, 'you');
+
+        await fs.appendFile(transcript, assistant('m2', { input_tokens: 10 }, [
+            { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'rm -rf build' } }
+        ]) + '\n');
+        await quiet();
+        s = (await collectClaude([folder])).sessions[0];
+        assert.strictEqual(s.waitingOn, 'Bash');
+
+        await fs.appendFile(transcript, JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1' }] } }) + '\n');
+        await quiet();
+        s = (await collectClaude([folder])).sessions[0];
+        assert.strictEqual(s.state, 'idle');
+    });
+
+    test('collects research and errors with their messages', async () => {
+        const lines = [
+            JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { content: 'Find the docs' } }),
+            assistant('m1', { input_tokens: 10 }, [
+                { type: 'tool_use', id: 't1', name: 'WebSearch', input: { query: 'vscode webview api' } },
+                { type: 'tool_use', id: 't2', name: 'WebFetch', input: { url: 'https://www.example.com/docs' } },
+                { type: 'tool_use', id: 't3', name: 'Bash', input: { command: 'false' } }
+            ]),
+            JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { content: [
+                { type: 'tool_result', tool_use_id: 't3', is_error: true, content: 'exit code 1' }
+            ] } })
+        ];
+        await fs.writeFile(transcript, lines.join('\n') + '\n');
+        const s = (await collectClaude([folder])).sessions[0];
+        assert.deepStrictEqual(s.research.map(r => [r.kind, r.text, r.url]).sort(), [
+            ['fetch', 'example.com/docs', 'https://www.example.com/docs'],
+            ['search', 'vscode webview api', '']
+        ]);
+        assert.deepStrictEqual(s.errors.map(e => [e.tool, e.message]), [['Bash', 'exit code 1']]);
+        assert.strictEqual(s.models[0].model, 'sonnet-5-5');
+    });
+
+    test('lists older sessions as history and adds up spend per day', async () => {
+        await fs.writeFile(transcript, assistant('m1', { input_tokens: 1_000_000 }) + '\n');
+        const old = path.join(path.dirname(transcript), 'session-0.jsonl');
+        await fs.writeFile(old, [
+            JSON.stringify({ type: 'ai-title', aiTitle: 'Yesterday work' }),
+            assistant('m0', { input_tokens: 500_000 })
+        ].join('\n') + '\n');
+        const hourAgo = new Date(Date.now() - 60 * 60_000);
+        await fs.utimes(old, hourAgo, hourAgo);
+
+        const snap = await collectClaude([folder]);
+        assert.strictEqual(snap.sessions.length, 1);
+        assert.deepStrictEqual(snap.history.map(h => [h.id, h.title, h.cwd]), [['session-0', 'Yesterday work', folder]]);
+        assert.strictEqual(snap.week.length, 7);
+        assert.strictEqual(snap.week[6].tokens, 1_500_000);
+        assert.strictEqual(snap.today.sessions, 2);
+    });
+
+    test('categoryOf ignores names inherited from Object.prototype', () => {
+        assert.strictEqual(categoryOf('constructor'), 'other');
+        assert.strictEqual(categoryOf('__proto__'), 'other');
+        assert.strictEqual(categoryOf('Edit'), 'edit');
     });
 
     test('returns no sessions when the project has no transcripts', async () => {

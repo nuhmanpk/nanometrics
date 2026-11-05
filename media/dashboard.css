@@ -14,7 +14,7 @@
   --red: var(--vscode-charts-red, #f14c4c);
   --purple: var(--vscode-charts-purple, #b180d7);
   --radius: 8px;
-  --mono: var(--vscode-editor-font-family, ui-monospace, monospace);
+  --mono: var(--vscode-editor-font-family), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -24,7 +24,7 @@ html, body {
   padding: 0;
   color: var(--fg);
   background: var(--bg);
-  font-family: var(--vscode-font-family);
+  font-family: var(--vscode-font-family), system-ui, -apple-system, 'Segoe UI', sans-serif;
   font-size: var(--vscode-font-size, 13px);
 }
 
@@ -46,10 +46,10 @@ button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .mono { font-family: var(--mono); }
 
 /* ---------- Tabs ---------- */
+/* The region wrapping the tab bar is what sticks; the bar inside it is only as tall as itself. */
+#top { position: sticky; top: 0; z-index: 2; }
+
 .topbar {
-  position: sticky;
-  top: 0;
-  z-index: 2;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -560,7 +560,7 @@ body[data-mode="compact"] { padding: 2px 0 4px; font-size: 12px; }
 .cc-step { padding: 2px 0; }
 .cc-step .muted { margin-left: auto; flex: none; font-size: 11px; }
 .cc-session .tool { flex: none; font-weight: 600; color: var(--blue); }
-.cc-session .detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; }
+.cc-session .detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11px; }
 .cc-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 .cc-todos { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; font-size: 12px; }
 .cc-todo { display: flex; gap: 6px; color: var(--muted); }
@@ -589,3 +589,127 @@ body.vscode-high-contrast-light .spark path.line { stroke-width: 2.2; }
   .spark path.line { stroke: CanvasText; }
   .spark path.area { fill: CanvasText; }
 }
+
+/* ---------- Top apps ---------- */
+.top-procs { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; }
+.top-proc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px 44px 56px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.top-proc .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top-proc .num { text-align: right; font-size: 11px; }
+.seg { display: inline-flex; border-radius: 4px; background: var(--track); padding: 1px; }
+.seg button { padding: 0 6px; font-size: 10px; border-radius: 3px; color: var(--muted); }
+.seg button.on { color: var(--fg); background: var(--vscode-editor-background, var(--bg)); }
+.svc-off { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: var(--muted); }
+.svc-off .dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); opacity: .6; }
+
+/* ---------- Claude project totals & load ---------- */
+.cc-project { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.cc-project-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; font-size: 11px; }
+.cc-project-head strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-project-head .muted { flex: none; }
+.mixbar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--track); gap: 1px; }
+.mixbar span { display: block; height: 100%; min-width: 2px; }
+.cc-first { margin-top: 0; }
+.cc-minor .v { font-size: 14px; }
+.cc-load .own { color: var(--fg); font-weight: 600; }
+.bar.stack { position: relative; }
+.bar.stack > div { position: absolute; left: 0; top: 0; }
+.bar.stack > .rest { background: color-mix(in srgb, var(--fg) 18%, transparent); }
+.cc-ctx { display: grid; grid-template-columns: minmax(40px, 1fr) auto; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; }
+.cc-ctx .bar { height: 4px; display: block; }
+.cc-ctx .bar span { display: block; height: 100%; border-radius: 2px; }
+
+/* ---------- Footer links ---------- */
+/* The app fills the view so the links sit at the bottom when content is short, and after it when it's long. */
+body:not([data-mode="compact"]) #app { display: flex; flex-direction: column; min-height: calc(100vh - 24px); }
+#links { margin-top: auto; }
+.links { display: flex; justify-content: center; gap: 14px; margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--border); }
+.links button { display: flex; color: var(--fg); opacity: .55; transition: opacity .15s; }
+.links button:hover { opacity: .9; }
+
+/* ---------- Claude summary on the Project tab ---------- */
+.cc-mini { flex-direction: column; align-items: stretch; gap: 6px; }
+.cc-mini-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cc-mini-stats { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 11px; color: var(--muted); padding-left: 16px; }
+.cc-mini-stats b { color: var(--fg); font-weight: 600; }
+.cc-mini .cc-ctx { margin: 0; padding-left: 16px; }
+.cc-over { color: var(--red) !important; }
+
+/* ---------- Loop warning & checkpoints ---------- */
+.cc-loop { display: flex; gap: 6px; align-items: baseline; padding: 5px 8px; border-radius: 6px; font-size: 12px; background: color-mix(in srgb, var(--red) 14%, transparent); }
+.cc-loop .ico, .cc-loop b { color: var(--red); }
+.cc-session:has(.cc-loop) { border-color: color-mix(in srgb, var(--red) 55%, transparent); }
+.cc-turn { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.cc-turn:last-child { border-bottom: none; }
+.cc-turn .proc-main { flex: 1; }
+.cc-turn-prompt { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-undo { flex: none; padding: 2px 8px; font-size: 11px; }
+button.cc-undo:hover { border-color: var(--orange); color: var(--orange); }
+
+/* ---------- Charts: hover, tokens, context ---------- */
+.chart { position: relative; }
+.chart-guide { position: absolute; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--fg) 45%, transparent); pointer-events: none; }
+.tip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 10;
+  max-width: 240px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-line;
+  pointer-events: none;
+  color: var(--vscode-editorHoverWidget-foreground, var(--fg));
+  background: var(--vscode-editorHoverWidget-background, var(--bg));
+  border: 1px solid var(--vscode-editorHoverWidget-border, var(--border));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .3);
+  font-variant-numeric: tabular-nums;
+}
+.axis { display: flex; justify-content: space-between; margin-top: 2px; font-size: 10px; color: var(--muted); }
+.tk-chart { display: block; width: 100%; }
+.tk-fresh { fill: var(--blue); }
+.tk-cached { fill: color-mix(in srgb, var(--blue) 32%, transparent); }
+.tk-cost { fill: none; stroke: var(--orange); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.legend.tk-fresh-k { background: var(--blue); }
+.legend.tk-cached-k { background: color-mix(in srgb, var(--blue) 32%, transparent); }
+.legend.tk-cost-k { background: var(--orange); height: 2px; vertical-align: middle; }
+.cc-ctx-chart { margin-top: -2px; }
+.cc-warn-line { stroke: var(--yellow); stroke-width: 1; stroke-dasharray: 3 3; opacity: .55; vector-effect: non-scaling-stroke; }
+.cc-compact { fill: var(--yellow); }
+.cc-compact-key { color: var(--yellow); }
+.trend { margin-right: 6px; font-size: 10px; }
+.trend.up { color: var(--orange); }
+.trend.down { color: var(--green); }
+.cc-day:hover .cc-day-bar span { filter: brightness(1.25); }
+
+/* ---------- Agents ---------- */
+.cc-agents { display: flex; flex-direction: column; padding: 4px 10px; }
+.cc-agent { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.cc-agent:last-of-type { border-bottom: none; }
+.cc-agent .cc-pulse { margin-top: 5px; }
+.cc-agent .proc-main { flex: 1; }
+.cc-agent-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cc-agent-head .pname { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-agent-type { font-size: 10px; padding: 0 6px; }
+.cc-agent-now { display: flex; align-items: baseline; gap: 6px; min-width: 0; margin-top: 2px; font-size: 11px; }
+.cc-agent-now .tool { flex: none; font-weight: 600; }
+.cc-agent-now .detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.cc-agent-meta { flex: none; display: flex; flex-direction: column; align-items: flex-end; font-size: 11px; line-height: 1.35; }
+
+/* ---------- Beginner-friendly Claude card on the Project tab ---------- */
+.cc-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; padding: 2px 0 0 16px; }
+.cc-tile { display: flex; flex-direction: column; min-width: 0; }
+.cc-tile b { font-size: 17px; font-weight: 600; line-height: 1.2; }
+.cc-tile > span { font-size: 11px; color: var(--muted); }
+.cc-tile .bar { height: 4px; margin-top: 4px; display: block; }
+.cc-tile .bar span { display: block; height: 100%; border-radius: 2px; }
+.cc-hint { margin-left: 16px; padding: 5px 8px; border-radius: 6px; font-size: 11px; color: var(--fg); background: var(--track); }
+.cc-mini.waiting .cc-hint { background: color-mix(in srgb, var(--yellow) 14%, transparent); }

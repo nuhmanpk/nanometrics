@@ -1,5 +1,6 @@
 import si from 'systeminformation';
 import { execFile } from 'child_process';
+import * as os from 'os';
 
 export interface SystemSnapshot {
   timestamp: number;
@@ -12,6 +13,8 @@ export interface SystemSnapshot {
     speed: number;
     temperature: number | null;
     temperatureAvg: number | null;
+    // 1, 5 and 15 minute load averages; null on Windows, which has none.
+    loadAvg: number[] | null;
   };
   memory: {
     percent: number;
@@ -26,6 +29,16 @@ export interface SystemSnapshot {
   battery?: { percent: number; charging: boolean; acConnected: boolean; timeRemaining: number | null } | null;
   gpu?: { model: string; vram: number | null; utilization: number | null }[];
   services?: ServiceStatus[];
+  // Heaviest apps, with helper processes of the same name folded together.
+  processes?: TopProcess[];
+}
+
+export interface TopProcess {
+  name: string;
+  count: number;
+  cpu: number;
+  memRss: number;
+  memPercent: number;
 }
 
 export interface ServiceStatus {
@@ -42,6 +55,7 @@ export interface SystemOptions {
   gpu: boolean;
   disk: boolean;
   temperature: boolean;
+  processes?: boolean;
   services: { label: string; query: string }[];
 }
 
@@ -108,6 +122,42 @@ function macTemperature() {
 }
 
 const GPU_TTL = 15_000;
+const PROC_TTL = 4_000;
+const MAX_PROCS = 8;
+let procCache: { at: number; value: TopProcess[] } | undefined;
+
+/** Groups processes by name, e.g. every "Code Helper" counts as one app. */
+export function groupProcesses(list: { name: string; cpu: number; memRss: number; mem: number }[]): TopProcess[] {
+  const groups = new Map<string, TopProcess>();
+  for (const p of list) {
+    const name = (p.name || '').replace(/\s*\((Renderer|GPU|Plugin|Service)\)$/, '').trim();
+    if (!name) {
+      continue;
+    }
+    const g = groups.get(name) ?? { name, count: 0, cpu: 0, memRss: 0, memPercent: 0 };
+    g.count++;
+    g.cpu += p.cpu || 0;
+    g.memRss += (p.memRss || 0) * 1024;
+    g.memPercent += p.mem || 0;
+    groups.set(name, g);
+  }
+  return [...groups.values()];
+}
+
+async function processInfo(): Promise<TopProcess[]> {
+  if (procCache && Date.now() - procCache.at < PROC_TTL) {
+    return procCache.value;
+  }
+  // ps reports per-core percent; scale to the whole machine so it lines up with the CPU gauge.
+  const cores = Math.max(1, os.cpus().length);
+  const all = groupProcesses((await si.processes()).list).map(p => ({ ...p, cpu: p.cpu / cores }));
+  // Keep the top by CPU and the top by memory, so the view can sort either way.
+  const byCpu = [...all].sort((a, b) => b.cpu - a.cpu).slice(0, MAX_PROCS);
+  const byMem = [...all].sort((a, b) => b.memRss - a.memRss).slice(0, MAX_PROCS);
+  const value = [...new Set([...byCpu, ...byMem])];
+  procCache = { at: Date.now(), value };
+  return value;
+}
 
 async function cpuInfo() {
   if (!cpuInfoCache) {
@@ -205,7 +255,7 @@ function settle<T>(p: Promise<T>): Promise<T | undefined> {
 }
 
 export async function collectSystem(opts: SystemOptions): Promise<SystemSnapshot> {
-  const [load, mem, info, temp, time, network, disk, battery, gpu, services] = await Promise.all([
+  const [load, mem, info, temp, time, network, disk, battery, gpu, services, processes] = await Promise.all([
     si.currentLoad(),
     si.mem(),
     cpuInfo(),
@@ -215,7 +265,8 @@ export async function collectSystem(opts: SystemOptions): Promise<SystemSnapshot
     opts.disk ? settle(diskInfo()) : undefined,
     opts.battery ? settle(batteryInfo()) : undefined,
     opts.gpu ? settle(gpuInfo()) : undefined,
-    settle(servicesInfo(opts.services))
+    settle(servicesInfo(opts.services)),
+    opts.processes ? settle(processInfo()) : undefined
   ]);
 
   return {
@@ -227,7 +278,8 @@ export async function collectSystem(opts: SystemOptions): Promise<SystemSnapshot
       cores: load.cpus.map(c => c.load),
       brand: info.brand,
       speed: info.speed,
-      ...cpuTemperature(opts.temperature, temp)
+      ...cpuTemperature(opts.temperature, temp),
+      loadAvg: process.platform === 'win32' ? null : os.loadavg()
     },
     memory: {
       percent: (mem.active / mem.total) * 100,
@@ -241,7 +293,8 @@ export async function collectSystem(opts: SystemOptions): Promise<SystemSnapshot
     disk: opts.disk ? disk ?? [] : undefined,
     battery: opts.battery ? battery ?? null : undefined,
     gpu: opts.gpu ? gpu ?? [] : undefined,
-    services: services ?? []
+    services: services ?? [],
+    processes: opts.processes ? processes ?? [] : undefined
   };
 }
 

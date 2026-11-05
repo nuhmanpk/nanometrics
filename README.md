@@ -38,7 +38,11 @@
 
 ----
 
-Explore and monitor system metrics effortlessly with this quick and convenient VSCode extension. Access real-time information on CPU load, memory usage, core load, and running instances of various services right from the side panel. Stay informed about your system's health and performance with ease.
+**Track Claude Code inside VS Code.** Nano Metrics shows what Claude Code is doing right now, and what it costs: live tokens, estimated cost and burn rate, context window fill, plan usage limits (5-hour and weekly), tool calls, subagents and edited files, per chat and for the whole project. Alerts tell you when a chat's context is nearly full or today's spend passes your budget.
+
+It is also a lightweight **system and project monitor**: CPU, memory, temperature, network, top apps, listening ports and the dev servers, watchers and language servers your workspace runs, all in the sidebar.
+
+Works with the Claude Code CLI and the Claude Code VS Code extension. Runs fully locally: no account, no telemetry, no network requests.
 
 ![NanoMetrics panel in the Explorer](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/explorer.png)
 
@@ -70,9 +74,15 @@ Watch your AI pair programmer work, without leaving the sidebar. The **Claude** 
 - **Errors** - failed tool calls with their error message
 - **Token graph** - tokens per minute over the last hour, across every session in the workspace
 - **Last 7 days** - estimated spend per day in this workspace, and today's total
-- **Past sessions** - the last week's sessions with their cost; **Resume** opens a terminal with `claude --resume`
-- **Plan usage** - your Claude plan's 5-hour and weekly limits as bars, with the time each one resets: the same numbers as `/usage` in Claude Code, read from Claude Code's local cache. No setup. The **/usage** button opens Claude Code with `/usage` filled in to refresh them
-- A **CC** row in the Explorer panel and a summary line on the Project tab show what Claude is doing at a glance
+- **Project totals** - estimated cost, tokens and tool calls across every chat in this project, with the mix of tool kinds
+- **Chats** - the last week's chats with their context fill, tool calls and cost; **Resume** opens a terminal with `claude --resume`
+- **Claude Code load** - CPU and memory of the running `claude` processes against total system usage, and tokens per minute
+- **Checkpoints and undo** - every recent prompt that changed files, with one-click **Undo** that restores those files to how they were before it (asks first, lists every file)
+- **Stuck-loop detector** - flags a chat that keeps failing the same command or keeps editing one file while errors continue
+- **Your-turn ping** - a notification (and optional sound) when Claude finishes or needs approval, so you can step away while it works
+- **Alerts** - a heads-up when a new chat starts, when a chat's context passes 80%, and when today's spend passes your budget
+- **Plan usage** - your Claude plan's 5-hour and weekly limits as bars, with the time each one resets: the same numbers as `/usage` in Claude Code, read from Claude Code's local cache. No setup. The **/usage** button opens Claude Code with `/usage` filled in to refresh them. Hidden when there is nothing to show
+- A **CC** row in the Explorer panel and a summary card on the Project tab show what Claude is doing at a glance
 
 It reads Claude Code's local session transcripts (`~/.claude/projects`). Nothing is uploaded.
 
@@ -80,7 +90,8 @@ It reads Claude Code's local session transcripts (`~/.claude/projects`). Nothing
 - Live CPU and memory gauges with history graphs
 - Per-core load heatmap and CPU temperature (where available)
 - Network throughput (download / upload) for the default interface
-- Disk and swap usage, battery and GPU info
+- **Top apps** by CPU or memory, with helper processes folded into one row
+- Load average, disk and swap usage, battery and GPU info
 - Optional service monitoring: MySQL, Postgres, MongoDB, Redis, Docker, Nginx, Apache, Elasticsearch, RabbitMQ, Kafka, OracleDB, SQL Server, Neo4j, Cassandra, MariaDB, CouchDB, InfluxDB, ClickHouse, Memcached, etcd, Consul, ZooKeeper, Prometheus, Grafana, MinIO, HAProxy, Traefik, Ollama
 
 ![System dashboard](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/image_dashboard.png)
@@ -123,6 +134,12 @@ See what your open project is costing you, right next to your code:
 | `nanometrics.enableGpu` / `enableBattery` | `false` | GPU and battery sections |
 | `nanometrics.statusBarStyle` | `full` | `compact` shortens the status bar to e.g. `12·45%` |
 | `nanometrics.claudePricing` | `{}` | Override model prices (USD per 1M tokens) for the cost estimate |
+| `nanometrics.claudeContextWarning` | `80` | Warn once per chat when its context passes this %; `0` turns it off |
+| `nanometrics.claudeDailyBudget` | `0` | Warn once a day when today's estimated spend (USD) passes this; `0` turns it off |
+| `nanometrics.notifyClaudeSession` | `true` | Notify when a new Claude Code chat starts in the workspace |
+| `nanometrics.claudeTurnNotify` | `unfocused` | Your-turn ping: `unfocused`, `always` or `off` |
+| `nanometrics.claudeTurnSound` | `false` | Play a short sound with the your-turn ping (macOS, Linux) |
+| `nanometrics.claudeLoopWarning` | `true` | Warn when a chat looks stuck in a loop |
 | `nanometrics.enable<Service>` | `false` | Monitor a background service |
 
 Process working directories and ports are read with `lsof` on macOS and `/proc` on Linux. On Windows the project monitor relies on terminals and command lines.

@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import * as path from 'path';
 import { collectSystem, SystemOptions, SystemSnapshot } from './sysinfoMetrics';
-import { collectClaude, ClaudeSnapshot } from './claudeActivity';
+import { collectClaude, ClaudeSnapshot, claudeResources, transcriptFiles } from './claudeActivity';
+import { insideRoots, planUndo } from './claudeCheckpoints';
 import { sanitizePricing } from './claudeUsage';
 import { readLimits, USAGE_URL } from './claudeLimits';
 import {
@@ -14,6 +15,12 @@ const TABS: Tab[] = ['system', 'project', 'claude'];
 const asTab = (t: unknown): Tab => (TABS.includes(t as Tab) ? t as Tab : 'system');
 
 const HISTORY = 60;
+
+// The only outside pages the footer may open.
+const LINKS: Record<string, string> = {
+    github: 'https://github.com/nuhmanpk/nanometrics',
+    sponsor: 'https://github.com/sponsors/nuhmanpk'
+};
 
 const SERVICES: { setting: string; label: string; query: string }[] = [
     { setting: 'enableMysql', label: 'MySQL', query: 'mysqld' },
@@ -70,6 +77,9 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
     private timer?: NodeJS.Timeout;
     private busy = false;
     private paused = false;
+    // Set when the extension picks the tab (sidebar opened, or a show command), so the webview drops its saved one.
+    private forceTab = false;
+    private lastShowTab = 0;
     private projectInfo: ProjectInfo[] = [];
     private readonly disposables: vscode.Disposable[] = [];
 
@@ -79,6 +89,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
         rx: new Ring(),
         tx: new Ring(),
         temp: new Ring(),
+        limit: new Ring(),
         projectCpu: new Ring(),
         projectMem: new Ring()
     };
@@ -89,6 +100,9 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
 
     private readonly _onSystem = new vscode.EventEmitter<SystemSnapshot>();
     readonly onSystem = this._onSystem.event;
+    private readonly _onClaude = new vscode.EventEmitter<ClaudeSnapshot>();
+    readonly onClaude = this._onClaude.event;
+    private lastClaudeAt = 0;
 
     constructor(private readonly extensionUri: vscode.Uri) {
         this.disposables.push(
@@ -114,10 +128,16 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
         const mode = view.viewType === DashboardViewProvider.compactViewId ? 'compact' : 'full';
         view.webview.options = { enableScripts: true, localResourceRoots: [media] };
         view.webview.html = this.html(view.webview, media, mode);
+        if (mode === 'full') {
+            this.openOnProject();
+        }
 
         view.webview.onDidReceiveMessage(msg => this.onMessage(msg), undefined, this.disposables);
         view.onDidChangeVisibility(() => {
             if (view.visible) {
+                if (view.viewType === DashboardViewProvider.viewId) {
+                    this.openOnProject();
+                }
                 this.sendAll();
                 this.tick();
             }
@@ -129,6 +149,11 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
 
     private visible(mode?: 'full' | 'compact') {
         return [...this.views].some(v => v.visible && (!mode || (v.viewType === DashboardViewProvider.compactViewId) === (mode === 'compact')));
+    }
+
+    /** True while someone is already looking at the Claude tab. */
+    claudeTabVisible() {
+        return this.visible('full') && this.tab === 'claude';
     }
 
     start() {
@@ -149,7 +174,19 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
         this.post({ type: 'paused', paused: this.paused });
     }
 
+    /** Opening the sidebar from the activity bar lands on the Project tab, unless a show command just picked one. */
+    private openOnProject() {
+        if (Date.now() - this.lastShowTab < 1000) {
+            return;
+        }
+        this.tab = 'project';
+        this.forceTab = true;
+        this.post({ type: 'tab', tab: this.tab });
+    }
+
     showTab(tab: Tab) {
+        this.lastShowTab = Date.now();
+        this.forceTab = true;
         this.tab = tab;
         this.post({ type: 'tab', tab });
         this.tick();
@@ -193,10 +230,11 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
         this.busy = true;
         try {
             const visible = this.visible();
-            if (!visible && !vscode.workspace.getConfiguration('nanometrics').get('showStatusBar', true)) {
+            if (!visible && !vscode.workspace.getConfiguration('nanometrics').get('showStatusBar', true) && !claudeAlertsOn()) {
                 return;
             }
             const opts: SystemOptions = visible ? this.systemOptions() : { network: false, battery: false, gpu: false, disk: false, temperature: false, services: [] };
+            opts.processes = this.visible('full') && this.tab === 'system';
             if (this.visible('compact')) {
                 // The compact view always shows network, plus GPU (temperature instead on macOS).
                 opts.gpu = opts.gpu || process.platform !== 'darwin';
@@ -233,13 +271,23 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
                 this.lastProject = project;
                 this.post({ type: 'project', data: project, history: this.historyPayload() });
             }
-            if ((this.visible('full') && this.tab !== 'system') || this.visible('compact')) {
-                const [claude, limits] = await Promise.all([
+            // Alerts need fresh numbers now and then even when nobody is looking at Claude data.
+            // Poll faster while a session works, so "your turn" pings arrive promptly.
+            const busy = this.lastClaude?.sessions.some(s => s.state === 'working');
+            const alerts = claudeAlertsOn() && Date.now() - this.lastClaudeAt > (busy ? ALERT_BUSY_MS : ALERT_POLL_MS);
+            if ((this.visible('full') && this.tab !== 'system') || this.visible('compact') || alerts) {
+                const [claude, limits, resources] = await Promise.all([
                     collectClaude(folders, sanitizePricing(vscode.workspace.getConfiguration('nanometrics').get('claudePricing'))),
-                    readLimits()
+                    readLimits(),
+                    claudeResources()
                 ]);
-                this.lastClaude = { ...claude, limits };
-                this.post({ type: 'claude', data: this.lastClaude });
+                this.lastClaude = { ...claude, limits, resources };
+                this.lastClaudeAt = Date.now();
+                this._onClaude.fire(this.lastClaude);
+                if (limits.limits.length) {
+                    this.history.limit.push(limits.limits[0].percent);
+                }
+                this.post({ type: 'claude', data: this.lastClaude, history: this.historyPayload() });
             }
         } catch (err) {
             this.post({ type: 'error', message: String(err instanceof Error ? err.message : err) });
@@ -255,6 +303,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
             rx: this.history.rx.list,
             tx: this.history.tx.list,
             temp: this.history.temp.list,
+            limit: this.history.limit.list,
             projectCpu: this.history.projectCpu.list,
             projectMem: this.history.projectMem.list
         };
@@ -265,12 +314,16 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
         this.post({
             type: 'init',
             tab: this.tab,
+            force: this.forceTab,
             paused: this.paused,
             showGraph: config.get('showGraph', true),
+            interval: Math.max(1000, config.get<number>('refreshInterval', 2000)),
             warning: config.get('warningThreshold', 85),
+            budget: config.get('claudeDailyBudget', 0),
             info: this.projectInfo,
             hasWorkspace: (vscode.workspace.workspaceFolders ?? []).length > 0
         });
+        this.forceTab = false;
         if (this.lastSystem) {
             this.post({ type: 'system', data: this.lastSystem, history: this.historyPayload() });
         }
@@ -278,7 +331,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
             this.post({ type: 'project', data: this.lastProject, history: this.historyPayload() });
         }
         if (this.lastClaude) {
-            this.post({ type: 'claude', data: this.lastClaude });
+            this.post({ type: 'claude', data: this.lastClaude, history: this.historyPayload() });
         }
     }
 
@@ -302,9 +355,13 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
             case 'settings':
                 vscode.commands.executeCommand('workbench.action.openSettings', '@ext:nuhmanpk.nanometrics');
                 break;
-            case 'openPort':
-                vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${Number(msg.port)}`));
+            case 'openPort': {
+                const port = Number(msg.port);
+                if (Number.isInteger(port) && port > 0 && port < 65536) {
+                    vscode.env.openExternal(vscode.Uri.parse(`http://localhost:${port}`));
+                }
                 break;
+            }
             case 'kill': {
                 const pid = Number(msg.pid);
                 if (!containsPid(this.lastProject, pid)) {
@@ -348,6 +405,11 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
                 }
                 break;
             }
+            case 'external':
+                if (Object.prototype.hasOwnProperty.call(LINKS, msg.link)) {
+                    vscode.env.openExternal(vscode.Uri.parse(LINKS[msg.link]));
+                }
+                break;
             case 'resume': {
                 const past = this.lastClaude?.history.find(h => h.id === msg.id);
                 if (!past || !/^[\w-]+$/.test(past.id)) {
@@ -366,12 +428,78 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
                 }
                 break;
             }
+            case 'undoTurn':
+                await this.undoTurn(String(msg.session ?? ''), String(msg.turn ?? ''));
+                break;
             case 'showTerminal': {
                 const t = vscode.window.terminals.find(t => t.name === msg.name);
                 t?.show();
                 break;
             }
         }
+    }
+
+    /** Puts back every file Claude changed from the given prompt onwards, after the user confirms. */
+    private async undoTurn(sessionId: string, turnId: string) {
+        const session = this.lastClaude?.sessions.find(s => s.id === sessionId);
+        const turn = session?.turns.find(t => t.id === turnId);
+        if (!session || !turn || !/^[\w-]+$/.test(session.id)) {
+            return;
+        }
+        const plan = await planUndo(await transcriptFiles(session.cwd, session.id), turn.id);
+        // Never touch anything outside the open workspace folders.
+        const roots = (vscode.workspace.workspaceFolders ?? []).filter(f => f.uri.scheme === 'file').map(f => f.uri.fsPath);
+        const restores: NonNullable<typeof plan>['restores'] = [];
+        for (const r of plan?.restores ?? []) {
+            if (await insideRoots(r.path, roots)) {
+                restores.push(r);
+            }
+        }
+        if (!restores.length) {
+            vscode.window.showInformationMessage('Nothing to undo: no file changes Claude Code recorded for that prompt are in this workspace.');
+            return;
+        }
+        const rel = (p: string) => vscode.workspace.asRelativePath(p);
+        const created = restores.filter(r => r.original === null);
+        const changed = restores.filter(r => r.original !== null);
+        const detail = [
+            changed.length ? `Restore ${changed.length} file${changed.length === 1 ? '' : 's'}:\n${changed.map(r => `  ${rel(r.path)}`).join('\n')}` : '',
+            created.length ? `Move ${created.length} new file${created.length === 1 ? '' : 's'} to the trash:\n${created.map(r => `  ${rel(r.path)}`).join('\n')}` : '',
+            plan?.unknown.length ? `Can't restore (earlier content not recorded):\n${plan.unknown.map(p => `  ${rel(p)}`).join('\n')}` : '',
+            'Later edits to these files, yours included, are replaced. Changes made through shell commands are not undone.'
+        ].filter(Boolean).join('\n\n');
+        const choice = await vscode.window.showWarningMessage(`Undo Claude's changes since "${turn.prompt}"?`, { modal: true, detail }, 'Undo changes');
+        if (choice !== 'Undo changes') {
+            return;
+        }
+        const failed: string[] = [];
+        for (const r of restores) {
+            const uri = vscode.Uri.file(r.path);
+            try {
+                if (r.original === null) {
+                    await vscode.workspace.fs.delete(uri, { useTrash: true });
+                    continue;
+                }
+                const exists = await vscode.workspace.fs.stat(uri).then(() => true, () => false);
+                if (!exists) {
+                    await vscode.workspace.fs.writeFile(uri, Buffer.from(r.original, 'utf8'));
+                    continue;
+                }
+                // Through the editor, so an open file updates in place and Ctrl+Z brings Claude's version back.
+                const doc = await vscode.workspace.openTextDocument(uri);
+                const edit = new vscode.WorkspaceEdit();
+                edit.replace(uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), r.original);
+                await vscode.workspace.applyEdit(edit);
+                await doc.save();
+            } catch {
+                failed.push(rel(r.path));
+            }
+        }
+        const done = restores.length - failed.length;
+        vscode.window.showInformationMessage(
+            `Undid Claude's changes in ${done} file${done === 1 ? '' : 's'}${failed.length ? `; couldn't restore ${failed.join(', ')}` : ''}. ` +
+            'Tell Claude you reverted them, or it may assume its edits are still there.'
+        );
     }
 
     private post(message: unknown) {
@@ -405,8 +533,18 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
             clearInterval(this.timer);
         }
         this._onSystem.dispose();
+        this._onClaude.dispose();
         this.disposables.forEach(d => d.dispose());
     }
+}
+
+const ALERT_POLL_MS = 10_000;
+const ALERT_BUSY_MS = 4_000;
+
+function claudeAlertsOn(): boolean {
+    const config = vscode.workspace.getConfiguration('nanometrics');
+    return config.get('claudeContextWarning', 80) > 0 || config.get('claudeDailyBudget', 0) > 0 ||
+        config.get('claudeLoopWarning', true) || config.get<string>('claudeTurnNotify', 'unfocused') !== 'off';
 }
 
 function appBase(): string {

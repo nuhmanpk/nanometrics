@@ -4,6 +4,41 @@ All notable changes to the "nanometrics" extension will be documented in this fi
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.6.0]
+
+- **Claude** tab
+  - **Project totals**: estimated cost, tokens and tool calls across every chat Claude Code kept for this workspace (subagents included), with a bar splitting tool calls by kind
+  - **Chats** replaces Past sessions: each chat shows its context fill, tool calls, tokens and cost, with **Resume**
+  - **Claude Code load**: CPU and memory of the running `claude` processes drawn over total system usage, plus tokens per minute
+  - Session cards lead with tokens, estimated cost and burn rate, then context, then tool calls, files and lines
+  - **Plan usage** is hidden when Claude Code's cached limits carry no information (every window already reset)
+  - The Working / Waiting stats only show while a session is live
+- **Charts**
+  - Hover any chart for exact values, with a crosshair: CPU, memory, network, project CPU, tokens, activity, context, the 7-day bars and the Explorer rows
+  - **Tokens · last hour** splits new tokens from cache reads and draws the running cost on top, with a time axis
+  - **Context over time** per session, with the warning line at 80% and markers where the chat was compacted
+  - **Activity** zooms to the session's length instead of always spanning 30 minutes
+  - **Last 7 days** shows the change against the previous seven days
+- **Agents** section above Sessions while subagents run: each active agent, its tool and what it is doing, and how long it has run
+- Fixed monospace text falling back to a serif font when the editor font isn't available to the webview
+- **Checkpoints**: each recent prompt that changed files is listed in the session card; **Undo** puts those files back the way they were before it (new files go to the trash), after a confirmation listing every file. Uses the file contents Claude Code records with each Edit and Write; shell-command edits can't be undone
+- **Stuck-loop detector**: a red **Looks stuck** banner, and one warning, when the same call fails again and again or a file is edited over and over while errors continue (`nanometrics.claudeLoopWarning`)
+- **Your-turn ping**: a notification when Claude finishes or stops for an approval, by default only while VS Code isn't focused (`nanometrics.claudeTurnNotify`), with an optional sound (`nanometrics.claudeTurnSound`)
+- **Alerts**
+  - A notification when a new Claude Code chat starts in the workspace, at most once per window (`nanometrics.notifyClaudeSession`, or **Don't show again**)
+  - A warning once per chat when its context passes `nanometrics.claudeContextWarning` (default 80%)
+  - A warning once a day when today's estimated spend passes `nanometrics.claudeDailyBudget` (off by default); the Explorer **CC** value turns red while over budget
+- **Project** tab: the Claude summary is now a small card with status, all-time cost, tokens, tool calls, today's cost and context; click it to open the Claude tab
+- Opening Nano Metrics from the activity bar lands on the Project tab
+- **System** tab
+  - **Top apps**: the heaviest apps right now, with helper processes folded together, sortable by CPU or memory
+  - Load average next to the core count, a shorter memory readout, storage and hardware in one card
+  - Stopped services fold into one line instead of a chip each
+- Explorer view: graphs for the **LIM** and **CC** rows
+- GitHub and Sponsor links at the bottom of the dashboard
+- Fixed the tab bar not staying pinned when scrolling
+- Marketplace listing: clearer name and description, **AI** category, search keywords, sponsor, issues and homepage links
+
 ## [0.5.0]
 
 - New **Claude** tab: everything Claude Code is doing in this workspace, separate from the Project tab

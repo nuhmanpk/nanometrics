@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import { execFile } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
 import {
@@ -56,6 +57,20 @@ export interface ClaudePastSession {
   updated: number;
   tokens: string;
   cost: string;
+  toolCalls: number;
+  // Prompt size of the chat's latest request, against its model's window.
+  context: ClaudeContext | null;
+}
+
+export interface ClaudeProjectTotals {
+  // Every transcript Claude Code kept for the workspace folders, subagents included.
+  sessions: number;
+  since: number;
+  tokens: string;
+  tokenDetail: string;
+  cost: string;
+  toolCalls: number;
+  toolMix: Record<ToolCategory, number>;
 }
 
 export interface ClaudeDay {
@@ -78,14 +93,33 @@ export interface ClaudeAgent {
   type: string;
   state: 'working' | 'done';
   updated: number;
+  started: number;
+  // Latest tool call, for "what is it doing right now".
+  current: ClaudeStep | null;
   toolCalls: number;
   tokens: string;
   cost: string;
 }
 
+export interface ClaudeTurn {
+  // uuid of the prompt's transcript row: where an undo rewinds to.
+  id: string;
+  prompt: string;
+  time: number;
+  files: string[];
+}
+
+export interface ClaudeLoop {
+  // What looks stuck, e.g. `Bash · npm test failed 4× in a row`, and a stable key so it is reported once.
+  text: string;
+  key: string;
+}
+
 export interface ClaudeSession {
   id: string;
   folder: string;
+  // Full workspace folder path the transcript belongs to.
+  cwd: string;
   title: string;
   // working: transcript written moments ago; waiting: quiet with a reply or tool call outstanding; idle: recent but quiet.
   state: 'working' | 'waiting' | 'idle';
@@ -108,6 +142,8 @@ export interface ClaudeSession {
   toolMix: Record<ToolCategory, number>;
   timeline: Record<ToolCategory, number>[];
   context: ClaudeContext | null;
+  // Context size of each request over the session as [epoch ms, tokens], oldest first; drops are compactions.
+  contextSeries: [number, number][];
   // Web searches and fetched pages, and failed tool calls, newest first.
   research: ClaudeResearch[];
   errors: ClaudeError[];
@@ -123,6 +159,9 @@ export interface ClaudeSession {
   burnRate: string;
   // Subagents the session spawned, newest first. Their tokens and cost are included in the session totals.
   agents: ClaudeAgent[];
+  // Recent prompts that changed files, newest first; each one can be undone.
+  turns: ClaudeTurn[];
+  loop: ClaudeLoop | null;
 }
 
 export interface ClaudeSnapshot {
@@ -131,11 +170,70 @@ export interface ClaudeSnapshot {
   // Older sessions from the last week, newest first, and spend per day for the last seven days (oldest first).
   history: ClaudePastSession[];
   week: ClaudeDay[];
-  today: { tokens: string; cost: string; sessions: number };
+  today: { tokens: string; cost: string; costUsd: number; sessions: number };
   // Tokens per minute across the workspace over the last hour, oldest first.
   tokenRate: number[];
-  // Plan limits, filled in by the dashboard.
+  // The same hour split into new tokens and cache reads, with estimated cost per minute.
+  tokenSplit: { fresh: number[]; cached: number[]; cost: number[] };
+  // The seven days before `week`, for a week-over-week comparison.
+  prevWeek: { tokens: number; cost: number };
+  project: ClaudeProjectTotals;
+  // Plan limits and Claude Code's own process load, filled in by the dashboard.
   limits?: ClaudeLimits;
+  resources?: ClaudeResources;
+}
+
+export interface ClaudeResources {
+  count: number;
+  // Share of the whole machine (all cores), like the system CPU figure.
+  cpu: number;
+  memRss: number;
+  memTotal: number;
+}
+
+/** True when a ps command line is the Claude Code CLI: a `claude` binary, or node running its cli.js. */
+export function isClaudeCommand(args: string): boolean {
+  const first = args.trim().split(/\s+/)[0] ?? '';
+  return /(^|\/)claude$/.test(first) || /@anthropic-ai\/claude-code\/cli\.m?js/.test(args);
+}
+
+/** CPU and memory of every running Claude Code process, read from ps. Empty on Windows. */
+let resourcesCache: { at: number; value: Promise<ClaudeResources> } | undefined;
+const RESOURCES_TTL = 3_000;
+
+export function claudeResources(): Promise<ClaudeResources> {
+  // ps lists every process; once every few seconds is plenty.
+  if (!resourcesCache || Date.now() - resourcesCache.at > RESOURCES_TTL) {
+    resourcesCache = { at: Date.now(), value: readResources() };
+  }
+  return resourcesCache.value;
+}
+
+function readResources(): Promise<ClaudeResources> {
+  const empty: ClaudeResources = { count: 0, cpu: 0, memRss: 0, memTotal: os.totalmem() };
+  if (process.platform === 'win32') {
+    return Promise.resolve(empty);
+  }
+  return new Promise(resolve => {
+    execFile('ps', ['-A', '-o', 'pcpu=,rss=,args='], { timeout: 3000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+      if (err) {
+        return resolve(empty);
+      }
+      const r = { ...empty };
+      for (const line of stdout.split('\n')) {
+        const m = /^\s*([\d.]+)\s+(\d+)\s+(.*)$/.exec(line);
+        if (!m || !isClaudeCommand(m[3])) {
+          continue;
+        }
+        r.count++;
+        r.cpu += Number(m[1]) || 0;
+        r.memRss += (Number(m[2]) || 0) * 1024;
+      }
+      // ps reports per-core percent; scale to the whole machine.
+      r.cpu /= Math.max(1, os.cpus().length);
+      resolve(r);
+    });
+  });
 }
 
 // A session counts as live while its transcript changed this recently.
@@ -200,6 +298,22 @@ function lineDelta(tool: string, input: any): [number, number] {
   }
 }
 
+/** Transcript file names (session ids + .jsonl) Claude Code has for one workspace folder; empty when there are none. */
+export async function sessionNames(folder: string): Promise<string[]> {
+  try {
+    return (await fs.readdir(projectDir(folder))).filter(n => n.endsWith('.jsonl'));
+  } catch {
+    return [];
+  }
+}
+
+/** Main transcript and every subagent transcript of one session. */
+export async function transcriptFiles(cwd: string, id: string): Promise<string[]> {
+  const dir = projectDir(cwd);
+  const main = path.join(dir, `${id}.jsonl`);
+  return [main, ...(await agentFiles(path.join(dir, id))).map(f => f.file)];
+}
+
 function projectDir(folder: string): string {
   // Claude Code stores transcripts under the folder path with every non-alphanumeric character as '-'.
   return path.join(os.homedir(), '.claude', 'projects', folder.replace(/[^a-zA-Z0-9]/g, '-'));
@@ -259,6 +373,8 @@ async function readTail(file: string, size: number): Promise<string> {
 interface FileUsage {
   offset: number;
   tracker: UsageTracker;
+  // Tool calls per category over the whole transcript; each tool_use block is written once.
+  tools: Record<ToolCategory, number>;
 }
 
 // Usage has to cover the whole transcript, not just the tail, so each file is read once and then only its new bytes.
@@ -266,14 +382,27 @@ const usageCache = new Map<string, FileUsage>();
 const CHUNK_BYTES = 4 * 1024 * 1024;
 
 async function readUsage(file: string, size: number, pricing: PriceTable): Promise<UsageTracker> {
+  return (await readFileUsage(file, size, pricing)).tracker;
+}
+
+function countTools(row: any, into: Record<ToolCategory, number>) {
+  const content = row?.type === 'assistant' ? row.message?.content : null;
+  for (const part of Array.isArray(content) ? content : []) {
+    if (part?.type === 'tool_use' && typeof part.name === 'string') {
+      into[categoryOf(part.name)]++;
+    }
+  }
+}
+
+async function readFileUsage(file: string, size: number, pricing: PriceTable): Promise<FileUsage> {
   let entry = usageCache.get(file);
   if (!entry || size < entry.offset) {
-    entry = { offset: 0, tracker: new UsageTracker(pricing) };
+    entry = { offset: 0, tracker: new UsageTracker(pricing), tools: emptyMix() };
     usageCache.set(file, entry);
   }
   entry.tracker.setPricing(pricing);
   if (size === entry.offset) {
-    return entry.tracker;
+    return entry;
   }
   const handle = await fs.open(file, 'r');
   try {
@@ -298,7 +427,9 @@ async function readUsage(file: string, size: number, pricing: PriceTable): Promi
           continue;
         }
         try {
-          entry.tracker.ingest(JSON.parse(line));
+          const row = JSON.parse(line);
+          entry.tracker.ingest(row);
+          countTools(row, entry.tools);
         } catch {
           // Partial or corrupt line.
         }
@@ -309,7 +440,7 @@ async function readUsage(file: string, size: number, pricing: PriceTable): Promi
   } finally {
     await handle.close();
   }
-  return entry.tracker;
+  return entry;
 }
 
 interface Parsed {
@@ -324,13 +455,57 @@ interface Parsed {
   added: number;
   removed: number;
   first: number;
-  // Prompt size of the latest request: everything the model had in context.
+  // Prompt size of the latest request: everything the model had in context, and how it grew.
   context: number;
+  contextSeries: [number, number][];
   // Tool calls still without a result, oldest first, and whether the last thing written was Claude's reply.
   pending: string[];
   replied: boolean;
   research: ClaudeResearch[];
   errors: ClaudeError[];
+  turns: ClaudeTurn[];
+  // Tool results in order, for spotting loops.
+  results: ToolResult[];
+}
+
+export interface ToolResult {
+  tool: string;
+  detail: string;
+  file: string;
+  error: boolean;
+}
+
+const MAX_CONTEXT_POINTS = 400;
+const LOOP_FAILS = 3;
+const LOOP_WINDOW = 12;
+const LOOP_EDITS = 5;
+
+/**
+ * Looks at the latest tool results for Claude going round in circles: the same call failing again and again with
+ * no success in between, or one file edited over and over while errors keep coming.
+ */
+export function detectLoop(results: ToolResult[]): ClaudeLoop | null {
+  const recent = results.slice(-LOOP_WINDOW);
+  const fails = new Map<string, number>();
+  for (const r of recent) {
+    const sig = `${r.tool}\u0000${r.detail}`;
+    fails.set(sig, r.error ? (fails.get(sig) ?? 0) + 1 : 0);
+  }
+  for (const [sig, n] of fails) {
+    if (n >= LOOP_FAILS) {
+      const [tool, detail] = sig.split('\u0000');
+      return { text: `${tool}${detail ? ` · ${detail}` : ''} failed ${n}× in a row`, key: `fail:${sig}` };
+    }
+  }
+  const edits = new Map<string, number>();
+  recent.filter(r => r.file && FILE_TOOLS.has(r.tool)).forEach(r => edits.set(r.file, (edits.get(r.file) ?? 0) + 1));
+  const errorCount = recent.filter(r => r.error).length;
+  for (const [file, n] of edits) {
+    if (n >= LOOP_EDITS && errorCount >= 2) {
+      return { text: `${base(file)} edited ${n}× while errors continue`, key: `edit:${file}` };
+    }
+  }
+  return null;
 }
 
 function resultText(content: unknown): string {
@@ -352,6 +527,9 @@ function parse(text: string, mtime: number): Parsed {
   const files = new Map<string, number>();
   const pending = new Map<string, string>();
   const names = new Map<string, string>();
+  const calls = new Map<string, { tool: string; detail: string; file: string }>();
+  const turns: ClaudeTurn[] = [];
+  const results: ToolResult[] = [];
   const research: ClaudeResearch[] = [];
   const errors: ClaudeError[] = [];
   let todos: ClaudeTodo[] = [];
@@ -364,6 +542,7 @@ function parse(text: string, mtime: number): Parsed {
   let removed = 0;
   let first = 0;
   let context = 0;
+  const contextSeries: [number, number][] = [];
   let replied = false;
 
   for (const line of text.split('\n')) {
@@ -387,6 +566,10 @@ function parse(text: string, mtime: number): Parsed {
       const u = parseUsage(row.message.usage);
       if (u) {
         context = u.input + u.cacheRead + u.cacheWrite5m + u.cacheWrite1h;
+        // Rows of one message repeat its usage; keep one point per change.
+        if (!contextSeries.length || contextSeries[contextSeries.length - 1][1] !== context) {
+          contextSeries.push([time, context]);
+        }
       }
       for (const part of row.message.content) {
         if (part?.type === 'text' && String(part.text ?? '').trim()) {
@@ -401,6 +584,9 @@ function parse(text: string, mtime: number): Parsed {
         if (part.id) {
           pending.set(part.id, part.name);
           names.set(part.id, part.name);
+          calls.set(part.id, {
+            tool: part.name, detail: describe(part.name, input), file: String(input.file_path ?? input.notebook_path ?? '')
+          });
         }
         if (part.name === 'WebSearch' && input.query) {
           research.push({ kind: 'search', text: short(input.query, 120), url: '', time });
@@ -413,6 +599,10 @@ function parse(text: string, mtime: number): Parsed {
         if (FILE_TOOLS.has(part.name)) {
           const file = String(input.file_path ?? input.notebook_path ?? '');
           files.set(file, (files.get(file) ?? 0) + 1);
+          const turn = turns[turns.length - 1];
+          if (turn && file && !turn.files.includes(file)) {
+            turn.files.push(file);
+          }
           const [a, r] = lineDelta(part.name, input);
           added += a;
           removed += r;
@@ -426,6 +616,10 @@ function parse(text: string, mtime: number): Parsed {
       for (const part of Array.isArray(content) ? content : []) {
         if (part?.type === 'tool_result') {
           pending.delete(part.tool_use_id);
+          const call = calls.get(part.tool_use_id);
+          if (call) {
+            results.push({ ...call, error: !!part.is_error });
+          }
           if (part.is_error) {
             failed++;
             errors.push({ tool: names.get(part.tool_use_id) ?? 'Tool', message: short(resultText(part.content), 160), time: time || mtime });
@@ -435,6 +629,9 @@ function parse(text: string, mtime: number): Parsed {
       const typed = promptText(content);
       if (typed) {
         lastPrompt = typed;
+        if (row.uuid) {
+          turns.push({ id: String(row.uuid), prompt: short(typed, 100), time: time || mtime, files: [] });
+        }
       }
       replied = false;
     }
@@ -442,7 +639,8 @@ function parse(text: string, mtime: number): Parsed {
 
   return {
     steps, files, todos, title, lastPrompt, model, toolCalls, failed, added, removed, first, context,
-    pending: [...pending.values()], replied, research, errors
+    contextSeries: contextSeries.slice(-MAX_CONTEXT_POINTS),
+    pending: [...pending.values()], replied, research, errors, turns, results
   };
 }
 
@@ -482,6 +680,20 @@ async function agentFiles(dir: string): Promise<AgentFile[]> {
   };
   await walk(path.join(dir, 'subagents'), 0);
   return out;
+}
+
+// A session quiet for a day has no agents still writing, so its subagent listing is reused instead of re-walked.
+const SETTLED_MS = 24 * 60 * 60_000;
+const agentCache = new Map<string, { mtime: number; files: AgentFile[] }>();
+
+async function cachedAgentFiles(dir: string, mainMtime: number, now: number): Promise<AgentFile[]> {
+  const hit = agentCache.get(dir);
+  if (hit && hit.mtime === mainMtime && now - mainMtime > SETTLED_MS) {
+    return hit.files;
+  }
+  const files = await agentFiles(dir);
+  agentCache.set(dir, { mtime: mainMtime, files });
+  return files;
 }
 
 async function readMeta(file: string): Promise<{ description?: string; agentType?: string }> {
@@ -524,10 +736,24 @@ function timelineOf(steps: ClaudeStep[], now: number): Record<ToolCategory, numb
   return buckets;
 }
 
-async function readSession(name: string, folder: string, main: AgentFile, subs: AgentFile[], pricing: PriceTable): Promise<ClaudeSession> {
+const MAX_TURNS = 6;
+
+// Tails are re-read and re-parsed only when a transcript grew; most ticks nothing changed.
+const parseCache = new Map<string, { size: number; mtime: number; parsed: Parsed }>();
+
+async function parsedTail(f: AgentFile): Promise<Parsed> {
+  const hit = parseCache.get(f.file);
+  if (hit && hit.size === f.size && hit.mtime === f.mtime) {
+    return hit.parsed;
+  }
+  const parsed = parse(await readTail(f.file, f.size), f.mtime);
+  parseCache.set(f.file, { size: f.size, mtime: f.mtime, parsed });
+  return parsed;
+}
+
+async function readSession(name: string, folder: string, cwd: string, main: AgentFile, subs: AgentFile[], pricing: PriceTable): Promise<ClaudeSession> {
   const now = Date.now();
-  const [text, tracker] = await Promise.all([readTail(main.file, main.size), readUsage(main.file, main.size, pricing)]);
-  const own = parse(text, main.mtime);
+  const [own, tracker] = await Promise.all([parsedTail(main), readUsage(main.file, main.size, pricing)]);
 
   const usage = emptyUsage();
   addUsage(usage, tracker.usage);
@@ -554,10 +780,9 @@ async function readSession(name: string, folder: string, main: AgentFile, subs: 
   const agents: ClaudeAgent[] = [];
   for (const sub of subs) {
     try {
-      const [subText, subTracker, meta] = await Promise.all([
-        readTail(sub.file, sub.size), readUsage(sub.file, sub.size, pricing), readMeta(sub.file)
+      const [p, subTracker, meta] = await Promise.all([
+        parsedTail(sub), readUsage(sub.file, sub.size, pricing), readMeta(sub.file)
       ]);
-      const p = parse(subText, sub.mtime);
       addUsage(usage, subTracker.usage);
       if (subTracker.totalCost !== null) {
         cost = (cost ?? 0) + subTracker.totalCost;
@@ -579,6 +804,8 @@ async function readSession(name: string, folder: string, main: AgentFile, subs: 
         type: meta.agentType ?? '',
         state: now - sub.mtime < WORKING_MS ? 'working' : 'done',
         updated: sub.mtime,
+        started: p.first || sub.mtime,
+        current: p.steps.length ? p.steps[p.steps.length - 1] : null,
         toolCalls: p.toolCalls,
         tokens: formatTokens(totalTokens(subTracker.usage)),
         cost: formatCost(subTracker.totalCost)
@@ -616,6 +843,7 @@ async function readSession(name: string, folder: string, main: AgentFile, subs: 
   return {
     id: name,
     folder,
+    cwd,
     title: short(own.title || own.lastPrompt || 'Claude Code session', 70),
     state: !quiet ? 'working' : waitingOn ? 'waiting' : 'idle',
     waitingOn,
@@ -635,6 +863,7 @@ async function readSession(name: string, folder: string, main: AgentFile, subs: 
     toolMix,
     timeline,
     context: contextOf(own.context, own.model),
+    contextSeries: own.contextSeries,
     research: newest(research, MAX_RESEARCH),
     errors: newest(errors, MAX_ERRORS),
     models: [...models]
@@ -653,22 +882,30 @@ async function readSession(name: string, folder: string, main: AgentFile, subs: 
     cost: formatCost(cost),
     costUsd: cost,
     burnRate,
-    agents
+    agents,
+    turns: own.turns.filter(t => t.files.length).slice(-MAX_TURNS).reverse(),
+    // Only worth raising while the session is still going.
+    loop: now - updated < RECENT_MS ? detectLoop(own.results) : null
   };
 }
 
-// Titles of past sessions, kept until their transcript changes.
-const titleCache = new Map<string, { mtime: number; title: string }>();
+interface PastMeta {
+  title: string;
+  context: ClaudeContext | null;
+}
 
-async function titleOf(file: AgentFile): Promise<string> {
-  const hit = titleCache.get(file.file);
+// Title and last context size of past sessions, kept until their transcript changes.
+const metaCache = new Map<string, { mtime: number; meta: PastMeta }>();
+
+async function metaOf(file: AgentFile): Promise<PastMeta> {
+  const hit = metaCache.get(file.file);
   if (hit?.mtime === file.mtime) {
-    return hit.title;
+    return hit.meta;
   }
   const p = parse(await readTail(file.file, file.size), file.mtime);
-  const title = short(p.title || p.lastPrompt || 'Claude Code session', 70);
-  titleCache.set(file.file, { mtime: file.mtime, title });
-  return title;
+  const meta = { title: short(p.title || p.lastPrompt || 'Claude Code session', 70), context: contextOf(p.context, p.model) };
+  metaCache.set(file.file, { mtime: file.mtime, meta });
+  return meta;
 }
 
 function lastDays(n: number, now: number): ClaudeDay[] {
@@ -685,11 +922,19 @@ export async function collectClaude(folders: string[], pricing: PriceTable = DEF
   const sessions: ClaudeSession[] = [];
   const history: ClaudePastSession[] = [];
   const now = Date.now();
-  const week = lastDays(7, now);
-  const byDay = new Map(week.map(d => [d.day, d]));
+  // Fourteen days are tallied so this week can be compared with the one before.
+  const fortnight = lastDays(14, now);
+  const week = fortnight.slice(7);
+  const byDay = new Map(fortnight.map(d => [d.day, d]));
   const today = week[week.length - 1].day;
   let todaySessions = 0;
   const tokenRate = new Array<number>(RATE_MIN).fill(0);
+  const tokenSplit = { fresh: new Array<number>(RATE_MIN).fill(0), cached: new Array<number>(RATE_MIN).fill(0), cost: new Array<number>(RATE_MIN).fill(0) };
+  const projectUsage = emptyUsage();
+  const projectMix = emptyMix();
+  let projectCost: number | null = null;
+  let projectSessions = 0;
+  let since = 0;
 
   for (const folder of folders) {
     const dir = projectDir(folder);
@@ -703,11 +948,11 @@ export async function collectClaude(folders: string[], pricing: PriceTable = DEF
       try {
         const file = path.join(dir, n);
         const st = await fs.stat(file);
-        if (st.size === 0 || now - st.mtimeMs > WEEK_MS) {
+        if (st.size === 0) {
           return null;
         }
         const main: AgentFile = { file, mtime: st.mtimeMs, size: st.size, born: st.birthtimeMs };
-        const subs = await agentFiles(path.join(dir, n.replace(/\.jsonl$/, '')));
+        const subs = await cachedAgentFiles(path.join(dir, n.replace(/\.jsonl$/, '')), st.mtimeMs, now);
         // A parent waiting on background agents stays quiet, so its agents count towards how recent it is.
         const mtime = Math.max(main.mtime, ...subs.map(s => s.mtime));
         return { name: n, main, subs, mtime };
@@ -720,10 +965,29 @@ export async function collectClaude(folders: string[], pricing: PriceTable = DEF
 
     for (const s of all) {
       try {
-        const trackers = await Promise.all([s.main, ...s.subs].map(f => readUsage(f.file, f.size, pricing)));
+        // Project totals cover every transcript; usage is cached per file, so only new bytes are read after the first scan.
+        const entries = await Promise.all([s.main, ...s.subs].map(f => readFileUsage(f.file, f.size, pricing)));
+        const trackers = entries.map(e => e.tracker);
         let usedToday = false;
         let tokens = 0;
+        let toolCalls = 0;
         let cost: number | null = null;
+        for (const e of entries) {
+          addUsage(projectUsage, e.tracker.usage);
+          if (e.tracker.totalCost !== null) {
+            projectCost = (projectCost ?? 0) + e.tracker.totalCost;
+          }
+          for (const k of Object.keys(projectMix) as ToolCategory[]) {
+            projectMix[k] += e.tools[k];
+            toolCalls += e.tools[k];
+          }
+        }
+        projectSessions++;
+        const born = s.main.born && s.main.born > 0 ? s.main.born : s.main.mtime;
+        since = since ? Math.min(since, born) : born;
+        if (now - s.mtime > 2 * WEEK_MS) {
+          continue;
+        }
         for (const t of trackers) {
           t.byDay.forEach((b, day) => {
             const d = byDay.get(day);
@@ -741,19 +1005,29 @@ export async function collectClaude(folders: string[], pricing: PriceTable = DEF
         if (usedToday) {
           todaySessions++;
         }
+        // Older than a week: counted in the previous week's total only.
+        if (now - s.mtime > WEEK_MS) {
+          continue;
+        }
         if (now - s.mtime < RATE_MIN * 60_000) {
-          trackers.forEach(tr => tr.addPerMinute(tokenRate, now));
+          trackers.forEach(tr => {
+            tr.addPerMinute(tokenRate, now);
+            tr.addPerMinuteSplit(tokenSplit, now);
+          });
         }
         if (live.includes(s)) {
-          sessions.push(await readSession(s.name.replace(/\.jsonl$/, ''), path.basename(folder), s.main, s.subs, pricing));
+          sessions.push(await readSession(s.name.replace(/\.jsonl$/, ''), path.basename(folder), folder, s.main, s.subs, pricing));
         } else if (history.length < MAX_HISTORY * folders.length) {
+          const meta = await metaOf(s.main);
           history.push({
             id: s.name.replace(/\.jsonl$/, ''),
             cwd: folder,
-            title: await titleOf(s.main),
+            title: meta.title,
             updated: s.mtime,
             tokens: formatTokens(tokens),
-            cost: formatCost(cost)
+            cost: formatCost(cost),
+            toolCalls,
+            context: meta.context
           });
         }
       } catch {
@@ -770,7 +1044,18 @@ export async function collectClaude(folders: string[], pricing: PriceTable = DEF
     sessions,
     history: history.slice(0, MAX_HISTORY),
     week,
-    today: { tokens: formatTokens(t.tokens), cost: formatCost(t.cost), sessions: todaySessions },
-    tokenRate
+    today: { tokens: formatTokens(t.tokens), cost: formatCost(t.cost), costUsd: t.cost, sessions: todaySessions },
+    tokenRate,
+    tokenSplit,
+    prevWeek: fortnight.slice(0, 7).reduce((a, d) => ({ tokens: a.tokens + d.tokens, cost: a.cost + d.cost }), { tokens: 0, cost: 0 }),
+    project: {
+      sessions: projectSessions,
+      since,
+      tokens: formatTokens(totalTokens(projectUsage)),
+      tokenDetail: usageText({ usage: projectUsage }),
+      cost: formatCost(projectCost),
+      toolCalls: Object.values(projectMix).reduce((a, b) => a + b, 0),
+      toolMix: projectMix
+    }
   };
 }

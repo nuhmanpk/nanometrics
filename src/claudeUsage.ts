@@ -244,6 +244,20 @@ export class UsageTracker {
     }
   }
 
+  /** Per minute over the last `n` minutes, oldest first: new tokens (input, output, cache writes), cache reads, cost. */
+  addPerMinuteSplit(into: { fresh: number[]; cached: number[]; cost: number[] }, now: number): void {
+    const n = into.fresh.length;
+    for (const c of this.seen.values()) {
+      const age = Math.floor((now - c.time) / 60_000);
+      if (c.time && age >= 0 && age < n) {
+        const i = n - 1 - age;
+        into.cached[i] += c.usage.cacheRead;
+        into.fresh[i] += totalTokens(c.usage) - c.usage.cacheRead;
+        into.cost[i] += c.cost ?? 0;
+      }
+    }
+  }
+
   /** Total estimated cost, or null when no message had a known price. */
   get totalCost(): number | null {
     return this.priced && this.cost !== null ? Math.max(0, this.cost) : null;

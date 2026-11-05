@@ -1,16 +1,62 @@
 {
   "name": "nanometrics",
-  "displayName": "Nano Metrics",
+  "displayName": "Nano Metrics: Claude Code Usage, Cost & System Monitor",
   "icon": "images/logo.png",
   "publisher": "nuhmanpk",
-  "description": "Explore and monitor system metrics effortlessly with this quick and convenient VSCode extension. Access real-time information on CPU load, memory usage, core load, and running instances of various services right from the side panel. Stay informed about your system's health and performance with ease.",
-  "version": "0.5.0",
+  "description": "Track Claude Code live in the sidebar: tokens, cost, context window, plan usage limits, tool calls and subagents. Plus CPU, memory, network, ports and dev processes for your project.",
+  "version": "0.6.0",
+  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://github.com/nuhmanpk/nanometrics#readme",
+  "bugs": {
+    "url": "https://github.com/nuhmanpk/nanometrics/issues"
+  },
+  "sponsor": {
+    "url": "https://github.com/sponsors/nuhmanpk"
+  },
+  "qna": "https://github.com/nuhmanpk/nanometrics/issues",
+  "galleryBanner": {
+    "color": "#16161c",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.86.0"
   },
   "categories": [
+    "AI",
     "Visualization",
     "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "claude-code",
+    "anthropic",
+    "ai usage",
+    "token usage",
+    "token counter",
+    "ai cost",
+    "cost tracker",
+    "context window",
+    "usage limits",
+    "rate limit",
+    "agent monitor",
+    "vibe coding",
+    "ai agent",
+    "system monitor",
+    "cpu",
+    "memory",
+    "ram",
+    "performance",
+    "resource monitor",
+    "task manager",
+    "process manager",
+    "ports",
+    "network",
+    "temperature",
+    "dashboard",
+    "status bar",
+    "devtools",
+    "metrics"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -94,6 +140,45 @@
           "default": 2000,
           "minimum": 1000,
           "description": "How often metrics refresh, in milliseconds."
+        },
+        "nanometrics.claudeContextWarning": {
+          "type": "number",
+          "default": 80,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Warn once per chat when a live Claude Code chat's context passes this percent of its window. 0 turns it off."
+        },
+        "nanometrics.claudeDailyBudget": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Warn once a day when today's estimated Claude Code cost in this workspace (API pricing, USD) passes this amount. 0 turns it off."
+        },
+        "nanometrics.claudeTurnNotify": {
+          "type": "string",
+          "enum": ["unfocused", "always", "off"],
+          "enumDescriptions": [
+            "Only when VS Code isn't the focused window",
+            "Every time, even while you're in VS Code",
+            "Never"
+          ],
+          "default": "unfocused",
+          "description": "Notify when Claude Code finishes and waits for your next prompt, or stops to ask for approval."
+        },
+        "nanometrics.claudeTurnSound": {
+          "type": "boolean",
+          "default": false,
+          "description": "Also play a short system sound with the your-turn notification (macOS and Linux)."
+        },
+        "nanometrics.claudeLoopWarning": {
+          "type": "boolean",
+          "default": true,
+          "description": "Warn when a Claude Code chat looks stuck: the same call failing again and again, or one file edited repeatedly while errors continue."
+        },
+        "nanometrics.notifyClaudeSession": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a notification, at most once per window, when a new Claude Code chat starts in this workspace."
         },
         "nanometrics.showStatusBar": {
           "type": "boolean",

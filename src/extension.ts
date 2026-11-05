@@ -1,17 +1,24 @@
 import * as vscode from 'vscode';
 import { DashboardViewProvider } from './dashboardView';
 import { statusView, StatusBarStyle } from './statusText';
+import { ClaudeAlerts, ClaudeSessionNotifier } from './claudeNotify';
 
 const WELCOME_KEY = 'nanometrics.welcomeShown';
 
 export function activate(context: vscode.ExtensionContext) {
     const dashboard = new DashboardViewProvider(context.extensionUri);
+    const openClaude = async () => {
+        await vscode.commands.executeCommand(`${DashboardViewProvider.viewId}.focus`);
+        dashboard.showTab('claude');
+    };
     context.subscriptions.push(
         dashboard,
         vscode.window.registerWebviewViewProvider(DashboardViewProvider.viewId, dashboard, {
             webviewOptions: { retainContextWhenHidden: true }
         }),
-        vscode.window.registerWebviewViewProvider(DashboardViewProvider.compactViewId, dashboard)
+        vscode.window.registerWebviewViewProvider(DashboardViewProvider.compactViewId, dashboard),
+        new ClaudeSessionNotifier(context.globalState, () => dashboard.claudeTabVisible(), openClaude),
+        new ClaudeAlerts(dashboard.onClaude, openClaude)
     );
 
     const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);

@@ -13,11 +13,14 @@ export type PriceTable = Record<string, Price>;
 // Anthropic API list prices, keyed by a substring of the model id. The first matching key wins, so specific ids
 // come before family fallbacks. Override with the nanometrics.claudePricing setting.
 export const DEFAULT_PRICING: PriceTable = {
+  'fable-5-2': [10, 50, 0.25],
   'fable-5-1': [10, 50, 0.25],
   'mythos-5-1': [10, 50, 0.25],
   fable: [10, 50],
   mythos: [10, 50],
   'opus-5-5': [4, 20, 0.2],
+  'opus-4-6': [5, 25],
+  'opus-4-5': [5, 25],
   'opus-4-1': [15, 75],
   'opus-4-2025': [15, 75],
   'sonnet-5-5': [2, 10, 0.1],
@@ -25,6 +28,24 @@ export const DEFAULT_PRICING: PriceTable = {
   'haiku-5-5': [0.1, 0.5],
   'haiku-4-5': [1, 5],
   '3-5-haiku': [0.8, 4],
+  'haiku-3': [0.25, 1.25],
+  'sonnet-4-5': [3, 15],
+  // Other coding agents (Codex CLI, Gemini CLI): USD per 1M tokens, [input, output, cached input].
+  'gpt-5-mini': [0.25, 2, 0.025],
+  'gpt-5-nano': [0.05, 0.4, 0.005],
+  'gpt-5-codex': [1.25, 10, 0.125],
+  'gpt-5': [1.25, 10, 0.125],
+  'gpt-4-1-mini': [0.4, 1.6, 0.1],
+  'gpt-4-1': [2, 8, 0.5],
+  'gpt-4o-mini': [0.15, 0.6, 0.075],
+  'gpt-4o': [2.5, 10, 1.25],
+  o4: [1.1, 4.4, 0.275],
+  o3: [2, 8, 0.5],
+  'gemini-2.5-pro': [1.25, 10, 0.31],
+  'gemini-2.5-flash-lite': [0.1, 0.4, 0.025],
+  'gemini-2.5-flash': [0.3, 2.5, 0.075],
+  'gemini-3-pro': [2, 12, 0.2],
+  'gemini-3-flash': [0.5, 3, 0.05],
   opus: [5, 25],
   sonnet: [3, 15],
   haiku: [1, 5]
@@ -79,9 +100,9 @@ export function addUsage(into: TokenUsage, u: TokenUsage, sign = 1): void {
 }
 
 function match(model: string, table: PriceTable): [string, Price] | null {
-  const id = model.toLowerCase();
+  const id = model.toLowerCase().replace(/\./g, '-');
   for (const [key, price] of Object.entries(table)) {
-    if (id.includes(key.toLowerCase())) {
+    if (id.includes(key.toLowerCase().replace(/\./g, '-'))) {
       return [key, price];
     }
   }
@@ -256,6 +277,19 @@ export class UsageTracker {
         into.cost[i] += c.cost ?? 0;
       }
     }
+  }
+
+  /** Cost and tokens of messages whose timestamp falls in [from, to). Used to price one prompt and Claude's answer to it. */
+  spendBetween(from: number, to: number): { cost: number; tokens: number } {
+    let cost = 0;
+    let tokens = 0;
+    for (const c of this.seen.values()) {
+      if (c.time >= from && c.time < to) {
+        cost += c.cost ?? 0;
+        tokens += totalTokens(c.usage);
+      }
+    }
+    return { cost, tokens };
   }
 
   /** Total estimated cost, or null when no message had a known price. */

@@ -1,10 +1,10 @@
 {
   "name": "nanometrics",
   "displayName": "Nano Metrics: Claude Code Usage, Cost & System Monitor",
-  "icon": "images/logo.png",
+  "icon": "media/activity.svg",
   "publisher": "nuhmanpk",
   "description": "Track Claude Code live in the sidebar: tokens, cost, context window, plan usage limits, tool calls and subagents. Plus CPU, memory, network, ports and dev processes for your project.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "license": "SEE LICENSE IN LICENSE",
   "homepage": "https://github.com/nuhmanpk/nanometrics#readme",
   "bugs": {
@@ -31,7 +31,7 @@
     "claude code",
     "claude-code",
     "anthropic",
-    "ai usage",
+    "ai",
     "token usage",
     "token counter",
     "ai cost",
@@ -152,23 +152,36 @@
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "description": "Warn once a day when today's estimated Claude Code cost in this workspace (API pricing, USD) passes this amount. 0 turns it off."
+          "description": "Cost limit: warn once a day, with a sound, when today's estimated Claude Code cost in this workspace (API pricing, USD) passes this amount. 0 turns it off."
         },
-        "nanometrics.claudeTurnNotify": {
-          "type": "string",
-          "enum": ["unfocused", "always", "off"],
-          "enumDescriptions": [
-            "Only when VS Code isn't the focused window",
-            "Every time, even while you're in VS Code",
-            "Never"
-          ],
-          "default": "unfocused",
-          "description": "Notify when Claude Code finishes and waits for your next prompt, or stops to ask for approval."
+        "nanometrics.claudeDailyTokenLimit": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Warn once a day, with a sound, when Claude Code's total tokens today in this workspace pass this number (e.g. 5000000). 0 turns it off."
         },
-        "nanometrics.claudeTurnSound": {
+        "nanometrics.claudeSessionCostLimit": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Warn once per chat, with a sound, when a single chat's estimated cost (API pricing, USD) passes this amount. 0 turns it off."
+        },
+        "nanometrics.claudeSessionTokenLimit": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Warn once per chat, with a sound, when a single chat's total tokens pass this number. 0 turns it off."
+        },
+        "nanometrics.claudePlanPrice": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "What you pay for your Claude plan per month in USD (Pro 20, Max 100 or 200). When set, the Claude tab shows what the last 7 days would have cost on the API versus your plan. 0 hides it."
+        },
+        "nanometrics.claudeAlertSound": {
           "type": "boolean",
-          "default": false,
-          "description": "Also play a short system sound with the your-turn notification (macOS and Linux)."
+          "default": true,
+          "description": "Play a warning sound with token and cost limit alerts and stuck-loop warnings (macOS, Linux, Windows)."
         },
         "nanometrics.claudeLoopWarning": {
           "type": "boolean",
@@ -215,7 +228,7 @@
               "type": "number"
             },
             "minItems": 2,
-            "maxItems": 2
+            "maxItems": 3
           }
         },
         "nanometrics.showGraph": {

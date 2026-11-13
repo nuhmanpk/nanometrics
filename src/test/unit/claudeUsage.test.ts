@@ -161,3 +161,24 @@ suite('claudeUsage', () => {
         assert.strictEqual(formatCost(12.345), '$12.35');
     });
 });
+
+suite('promptCosts', () => {
+    const at = (id: string, time: string, out: number) => ({
+        type: 'assistant', timestamp: time, message: { id, model: 'claude-sonnet-5-5', usage: { output_tokens: out } }
+    });
+    test('spendBetween and promptCosts price each prompt and flag the pricey one', () => {
+        const { promptCosts } = require('../../claudeActivity');
+        const t = new UsageTracker();
+        t.ingest(at('a', '2026-01-01T10:00:30Z', 1_000));
+        t.ingest(at('b', '2026-01-01T10:05:30Z', 1_000));
+        t.ingest(at('c', '2026-01-01T10:10:30Z', 1_000));
+        t.ingest(at('d', '2026-01-01T10:15:30Z', 400_000));
+        const ms = (s: string) => Date.parse(s);
+        const turns = ['10:00', '10:05', '10:10', '10:15'].map((h, i) => ({ prompt: `p${i}`, time: ms(`2026-01-01T${h}:00Z`) }));
+        const out = promptCosts(turns, [t], ms('2026-01-01T10:20:00Z'));
+        assert.strictEqual(out[0].prompt, 'p3');
+        assert.strictEqual(out[0].pricey, true);
+        assert.strictEqual(out[1].pricey, false);
+        assert.ok(t.spendBetween(ms('2026-01-01T10:00:00Z'), ms('2026-01-01T10:05:00Z')).cost > 0);
+    });
+});

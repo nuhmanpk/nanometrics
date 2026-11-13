@@ -4,6 +4,17 @@ All notable changes to the "nanometrics" extension will be documented in this fi
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.7.0]
+
+- **Token and cost limits**: `claudeDailyTokenLimit`, `claudeDailyBudget`, `claudeSessionCostLimit`, `claudeSessionTokenLimit`; each warns once and plays a sound (`claudeAlertSound`)
+- **Removed** the "Claude finished, waiting for your reply" popups and their settings (`claudeTurnNotify`, `claudeTurnSound`)
+- **Other AI helpers**: Codex CLI and Gemini CLI chats with tokens and cost
+- **Model prices**: Fable 5.2, Opus 4.5/4.6, Sonnet 4.5, Haiku 3, GPT-5, GPT-4.x, o3/o4, Gemini 2.5/3 added, plus a price list in the Claude tab
+- **Cost per prompt** in each chat, expensive prompts flagged
+- **Plan vs API** value badge (`claudePlanPrice`)
+- **Privacy**: added PRIVACY.md and a clearer privacy section: nothing is collected or sent, everything is read locally and shown on your machine
+- README images are now animated SVGs
+
 ## [0.6.0]
 
 - **Claude** tab

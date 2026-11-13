@@ -1,55 +1,50 @@
 import * as vscode from 'vscode';
 import { execFile } from 'child_process';
 import { ClaudeSnapshot, sessionNames } from './claudeActivity';
+import { formatTokens } from './claudeUsage';
 
 /** A short system sound; silently does nothing where no player is found. */
 function playSound() {
-    const cmd = process.platform === 'darwin' ? ['afplay', ['/System/Library/Sounds/Glass.aiff']] :
-        process.platform === 'linux' ? ['paplay', ['/usr/share/sounds/freedesktop/stereo/complete.oga']] : null;
+    const cmd = process.platform === 'darwin' ? ['afplay', ['/System/Library/Sounds/Sosumi.aiff']] :
+        process.platform === 'linux' ? ['paplay', ['/usr/share/sounds/freedesktop/stereo/dialog-warning.oga']] :
+        process.platform === 'win32' ? ['powershell', ['-NoProfile', '-Command', '[console]::beep(880,300);[console]::beep(660,300)']] : null;
     if (cmd) {
-        execFile(cmd[0] as string, cmd[1] as string[], { timeout: 5000 }, () => { /* no sound is fine */ });
+        execFile(cmd[0] as string, cmd[1] as string[], { timeout: 5000, windowsHide: true }, () => { /* no sound is fine */ });
     }
 }
 
-/** Context and spend warnings, each shown once: per chat for context, per day for the budget. */
+/**
+ * Context, loop and spend warnings, each shown once: per chat for context and per-chat limits, per day for the
+ * daily limits. Limit warnings come with a sound unless nanometrics.claudeAlertSound is off.
+ */
 export class ClaudeAlerts implements vscode.Disposable {
     private readonly warnedContext = new Set<string>();
     private readonly warnedLoop = new Set<string>();
-    // Last state seen per session, to catch the moment a working session stops.
-    private readonly lastState = new Map<string, string>();
-
-    /** "Your turn" ping when a session goes from working to waiting on you, or on an approval. */
-    private turnPings(s: ClaudeSnapshot, config: vscode.WorkspaceConfiguration) {
-        const mode = config.get<string>('claudeTurnNotify', 'unfocused');
-        for (const c of s.sessions) {
-            const was = this.lastState.get(c.id);
-            this.lastState.set(c.id, c.state);
-            if (was !== 'working' || c.state !== 'waiting' || mode === 'off' || (mode === 'unfocused' && vscode.window.state.focused)) {
-                continue;
-            }
-            const message = c.waitingOn === 'you'
-                ? `Claude finished "${c.title}" and is waiting for your next prompt.`
-                : `Claude needs you in "${c.title}": waiting on ${c.waitingOn} (approval or a long run).`;
-            if (config.get('claudeTurnSound', false)) {
-                playSound();
-            }
-            this.ask(message, false);
-        }
-    }
-    private budgetDay = '';
+    private readonly warnedLimit = new Set<string>();
     private readonly sub: vscode.Disposable;
 
     constructor(onClaude: vscode.Event<ClaudeSnapshot>, private readonly openClaude: () => Thenable<void> | void) {
         this.sub = onClaude(s => this.check(s));
     }
 
-    private async ask(message: string, warn: boolean) {
+    private async ask(message: string, warn: boolean, sound = false) {
+        if (sound && vscode.workspace.getConfiguration('nanometrics').get('claudeAlertSound', true)) {
+            playSound();
+        }
         const open = 'Open Claude tab';
         const choice = await (warn ? vscode.window.showWarningMessage : vscode.window.showInformationMessage)(message, open, 'Settings');
         if (choice === open) {
             await this.openClaude();
         } else if (choice === 'Settings') {
             await vscode.commands.executeCommand('workbench.action.openSettings', 'nanometrics.claude');
+        }
+    }
+
+    /** Warns once per key when value passes a positive limit. */
+    private limit(key: string, value: number, limit: number, message: () => string) {
+        if (limit > 0 && value > limit && !this.warnedLimit.has(key)) {
+            this.warnedLimit.add(key);
+            this.ask(message(), true, true);
         }
     }
 
@@ -71,16 +66,24 @@ export class ClaudeAlerts implements vscode.Disposable {
                 if (c.loop && key && !this.warnedLoop.has(key)) {
                     this.warnedLoop.add(key);
                     this.ask(`Claude Code looks stuck in "${c.title}": ${c.loop.text}. ` +
-                        'Consider stepping in with a hint, or press Esc in Claude Code to stop it.', true);
+                        'Consider stepping in with a hint, or press Esc in Claude Code to stop it.', true, true);
                 }
             }
         }
-        this.turnPings(s, config);
-        const budget = config.get('claudeDailyBudget', 0);
-        const today = new Date().toDateString();
-        if (budget > 0 && s.today.costUsd > budget && this.budgetDay !== today) {
-            this.budgetDay = today;
-            this.ask(`Claude Code spend today is ${s.today.cost}, over your $${budget.toFixed(2)} budget (estimated at API prices).`, true);
+        const day = new Date().toDateString();
+        const costLimit = config.get('claudeDailyBudget', 0);
+        const tokenLimit = config.get('claudeDailyTokenLimit', 0);
+        this.limit(`cost:${day}`, s.today.costUsd, costLimit, () =>
+            `Cost limit reached: Claude Code spend today is ${s.today.cost}, over your $${costLimit.toFixed(2)} limit (estimated at API prices).`);
+        this.limit(`tokens:${day}`, s.today.tokenCount, tokenLimit, () =>
+            `Token limit reached: Claude Code used ${s.today.tokens} tokens today, over your ${formatTokens(tokenLimit)} limit.`);
+        const chatCost = config.get('claudeSessionCostLimit', 0);
+        const chatTokens = config.get('claudeSessionTokenLimit', 0);
+        for (const c of s.sessions) {
+            this.limit(`ccost:${c.id}`, c.costUsd ?? 0, chatCost, () =>
+                `Cost limit reached: "${c.title}" has spent ${c.cost}, over your $${chatCost.toFixed(2)} per-chat limit.`);
+            this.limit(`ctok:${c.id}`, c.tokenCount, chatTokens, () =>
+                `Token limit reached: "${c.title}" used ${c.tokens} tokens, over your ${formatTokens(chatTokens)} per-chat limit.`);
         }
     }
 

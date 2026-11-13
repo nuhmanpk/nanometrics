@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import * as crypto from 'crypto';
 import * as path from 'path';
 import { collectSystem, SystemOptions, SystemSnapshot } from './sysinfoMetrics';
-import { collectClaude, ClaudeSnapshot, claudeResources, transcriptFiles } from './claudeActivity';
+import { collectClaude, ClaudeSnapshot, claudeResources, transcriptFiles, projectDir } from './claudeActivity';
 import { insideRoots, planUndo } from './claudeCheckpoints';
 import { sanitizePricing } from './claudeUsage';
+import { collectOtherAgents } from './otherAgents';
 import { readLimits, USAGE_URL } from './claudeLimits';
 import {
     collectProject, containsPid, isSafeScriptName, killProcessTree, ProjectSnapshot, readProjectInfo, ProjectInfo
@@ -224,6 +226,8 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
     }
 
     private async tick() {
+        // Claude runs on its own track: slow system sampling or process scans must not hold its numbers back.
+        void this.refreshClaude(false);
         if (this.busy || this.paused) {
             return;
         }
@@ -271,28 +275,90 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
                 this.lastProject = project;
                 this.post({ type: 'project', data: project, history: this.historyPayload() });
             }
-            // Alerts need fresh numbers now and then even when nobody is looking at Claude data.
-            // Poll faster while a session works, so "your turn" pings arrive promptly.
-            const busy = this.lastClaude?.sessions.some(s => s.state === 'working');
-            const alerts = claudeAlertsOn() && Date.now() - this.lastClaudeAt > (busy ? ALERT_BUSY_MS : ALERT_POLL_MS);
-            if ((this.visible('full') && this.tab !== 'system') || this.visible('compact') || alerts) {
-                const [claude, limits, resources] = await Promise.all([
-                    collectClaude(folders, sanitizePricing(vscode.workspace.getConfiguration('nanometrics').get('claudePricing'))),
-                    readLimits(),
-                    claudeResources()
-                ]);
-                this.lastClaude = { ...claude, limits, resources };
-                this.lastClaudeAt = Date.now();
-                this._onClaude.fire(this.lastClaude);
-                if (limits.limits.length) {
-                    this.history.limit.push(limits.limits[0].percent);
-                }
-                this.post({ type: 'claude', data: this.lastClaude, history: this.historyPayload() });
-            }
         } catch (err) {
             this.post({ type: 'error', message: String(err instanceof Error ? err.message : err) });
         } finally {
             this.busy = false;
+        }
+    }
+
+
+    private claudeBusy = false;
+    private claudeAgain = false;
+    private watchers: fs.FSWatcher[] = [];
+    private watchTimer?: NodeJS.Timeout;
+    private watched = '';
+
+    /** Refreshes Claude data. `force` skips the idle-alert throttle, used when a transcript just changed. */
+    private async refreshClaude(force: boolean) {
+        if (this.paused) {
+            return;
+        }
+        if (this.claudeBusy) {
+            // A change arrived mid-scan: go once more right after, so the last write is never missed.
+            this.claudeAgain = this.claudeAgain || force;
+            return;
+        }
+        const busy = this.lastClaude?.sessions.some(s => s.state === 'working');
+        const alerts = claudeAlertsOn() && Date.now() - this.lastClaudeAt > (busy ? ALERT_BUSY_MS : ALERT_POLL_MS);
+        const watching = (this.visible('full') && this.tab !== 'system') || this.visible('compact');
+        if (!watching && !alerts) {
+            return;
+        }
+        // While someone watches a working chat, don't wait for the next tick.
+        if (!force && !alerts && watching && Date.now() - this.lastClaudeAt < 900) {
+            return;
+        }
+        this.claudeBusy = true;
+        try {
+            const folders = (vscode.workspace.workspaceFolders ?? []).filter(f => f.uri.scheme === 'file').map(f => f.uri.fsPath);
+            this.watchTranscripts(folders);
+            const pricing = sanitizePricing(vscode.workspace.getConfiguration('nanometrics').get('claudePricing'));
+            const [claude, limits, resources, otherAgents] = await Promise.all([
+                collectClaude(folders, pricing),
+                readLimits(),
+                claudeResources(),
+                collectOtherAgents(folders, pricing).catch(() => [])
+            ]);
+            this.lastClaude = { ...claude, limits, resources, otherAgents };
+            this.lastClaudeAt = Date.now();
+            this._onClaude.fire(this.lastClaude);
+            if (limits.limits.length) {
+                this.history.limit.push(limits.limits[0].percent);
+            }
+            this.post({ type: 'claude', data: this.lastClaude, history: this.historyPayload() });
+        } catch (err) {
+            this.post({ type: 'error', message: String(err instanceof Error ? err.message : err) });
+        } finally {
+            this.claudeBusy = false;
+            if (this.claudeAgain) {
+                this.claudeAgain = false;
+                void this.refreshClaude(true);
+            }
+        }
+    }
+
+    /** Watches Claude Code's transcript folders, so a new tool call shows within a fraction of a second, not on the next poll. */
+    private watchTranscripts(folders: string[]) {
+        const key = folders.join('|');
+        if (key === this.watched) {
+            return;
+        }
+        this.watched = key;
+        this.watchers.forEach(w => w.close());
+        this.watchers = [];
+        for (const folder of folders) {
+            try {
+                const w = fs.watch(projectDir(folder), { persistent: false }, () => {
+                    clearTimeout(this.watchTimer);
+                    this.watchTimer = setTimeout(() => void this.refreshClaude(true), 250);
+                });
+                w.on('error', () => { /* folder vanished; the poll still covers it */ });
+                this.watchers.push(w);
+            } catch {
+                // No transcripts yet; the next scan tries again once Claude Code creates the folder.
+                this.watched = '';
+            }
         }
     }
 
@@ -320,6 +386,10 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
             interval: Math.max(1000, config.get<number>('refreshInterval', 2000)),
             warning: config.get('warningThreshold', 85),
             budget: config.get('claudeDailyBudget', 0),
+            tokenLimit: config.get('claudeDailyTokenLimit', 0),
+            planPrice: config.get('claudePlanPrice', 0),
+            pricing: Object.entries(sanitizePricing(config.get('claudePricing')))
+                .map(([model, p]) => ({ model, input: p[0], output: p[1], cached: p[2] ?? Math.round(p[0] * 0.1 * 1000) / 1000 })),
             info: this.projectInfo,
             hasWorkspace: (vscode.workspace.workspaceFolders ?? []).length > 0
         });
@@ -532,6 +602,8 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider, vscode
         if (this.timer) {
             clearInterval(this.timer);
         }
+        this.watchers.forEach(w => w.close());
+        clearTimeout(this.watchTimer);
         this._onSystem.dispose();
         this._onClaude.dispose();
         this.disposables.forEach(d => d.dispose());
@@ -544,7 +616,8 @@ const ALERT_BUSY_MS = 4_000;
 function claudeAlertsOn(): boolean {
     const config = vscode.workspace.getConfiguration('nanometrics');
     return config.get('claudeContextWarning', 80) > 0 || config.get('claudeDailyBudget', 0) > 0 ||
-        config.get('claudeLoopWarning', true) || config.get<string>('claudeTurnNotify', 'unfocused') !== 'off';
+        config.get('claudeLoopWarning', true) || config.get('claudeDailyTokenLimit', 0) > 0 ||
+        config.get('claudeSessionCostLimit', 0) > 0 || config.get('claudeSessionTokenLimit', 0) > 0;
 }
 
 function appBase(): string {

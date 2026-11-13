@@ -1,6 +1,6 @@
 # Nano Metrics - VSCode Extension
 
-![Nano Metrics Logo](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/logo-full.png)
+![Nano Metrics Logo](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/logo-full.svg)
 
 
 <p align="center">
@@ -44,7 +44,7 @@ It is also a lightweight **system and project monitor**: CPU, memory, temperatur
 
 Works with the Claude Code CLI and the Claude Code VS Code extension. Runs fully locally: no account, no telemetry, no network requests.
 
-![NanoMetrics panel in the Explorer](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/explorer.png)
+![NanoMetrics panel in the Explorer](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/explorer.svg)
 
 <p align="center">
   <a href="https://www.producthunt.com/products/nano-metrics?utm_source=badge-follow&utm_medium=badge&utm_source=badge-nano&#0045;metrics" target="_blank">
@@ -57,7 +57,9 @@ Works with the Claude Code CLI and the Claude Code VS Code extension. Runs fully
 
 ### Claude Code activity tracking
 
-![Claude Code session in the Claude tab](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/claude_session.png)
+<p align="center"><img src="https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/claude_dashboard.svg" alt="Claude tab: cost, tokens, context and activity" width="360"></p>
+
+![Claude Code session in the Claude tab](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/claude_session.svg)
 
 Watch your AI pair programmer work, without leaving the sidebar. The **Claude** tab follows every recent Claude Code session in your workspace:
 - **Live status** - Working, **Your turn** (Claude finished and waits for your prompt), **Waiting on a tool** (a permission prompt or a long run) or Idle. The tab shows a dot when a session needs you, so you notice from any tab
@@ -79,8 +81,12 @@ Watch your AI pair programmer work, without leaving the sidebar. The **Claude** 
 - **Claude Code load** - CPU and memory of the running `claude` processes against total system usage, and tokens per minute
 - **Checkpoints and undo** - every recent prompt that changed files, with one-click **Undo** that restores those files to how they were before it (asks first, lists every file)
 - **Stuck-loop detector** - flags a chat that keeps failing the same command or keeps editing one file while errors continue
-- **Your-turn ping** - a notification (and optional sound) when Claude finishes or needs approval, so you can step away while it works
-- **Alerts** - a heads-up when a new chat starts, when a chat's context passes 80%, and when today's spend passes your budget
+- **Cost per prompt** - what each of your recent prompts cost (Claude's whole answer and its subagents), with expensive ones flagged red so you learn what to ask smaller
+- **Plan vs API** - set `nanometrics.claudePlanPrice` (e.g. 20 for Pro) and the Claude tab shows what your last 7 days would have cost on the API against your plan, as a savings badge
+- **Token and cost limits** - set a daily token limit, a daily cost limit and per-chat limits; you get a warning **with a sound** the moment one is passed
+- **Alerts** - a heads-up when a new chat starts, when a chat's context passes 80%, or when a chat looks stuck. No "Claude is done" popups
+- **Other AI helpers** - Codex CLI and Gemini CLI chats found on your machine, with tokens and cost per chat and today's total
+- **Price list** - a built-in table of what each model charges per 1M tokens in, out and cached (Claude Fable, Opus, Sonnet, Haiku, plus GPT and Gemini), and `nanometrics.claudePricing` to override it
 - **Plan usage** - your Claude plan's 5-hour and weekly limits as bars, with the time each one resets: the same numbers as `/usage` in Claude Code, read from Claude Code's local cache. No setup. The **/usage** button opens Claude Code with `/usage` filled in to refresh them. Hidden when there is nothing to show
 - A **CC** row in the Explorer panel and a summary card on the Project tab show what Claude is doing at a glance
 
@@ -94,7 +100,7 @@ It reads Claude Code's local session transcripts (`~/.claude/projects`). Nothing
 - Load average, disk and swap usage, battery and GPU info
 - Optional service monitoring: MySQL, Postgres, MongoDB, Redis, Docker, Nginx, Apache, Elasticsearch, RabbitMQ, Kafka, OracleDB, SQL Server, Neo4j, Cassandra, MariaDB, CouchDB, InfluxDB, ClickHouse, Memcached, etcd, Consul, ZooKeeper, Prometheus, Grafana, MinIO, HAProxy, Traefik, Ollama
 
-![System dashboard](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/image_dashboard.png)
+![System dashboard](https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/image_dashboard.svg)
 
 ### Project monitor
 See what your open project is costing you, right next to your code:
@@ -109,6 +115,25 @@ See what your open project is costing you, right next to your code:
 
 - CPU and memory in the status bar, highlighted when usage crosses your warning threshold
 - Uses your VS Code theme colors, light or dark
+
+### Model prices (USD per 1M tokens)
+
+| Model | In | Out | Cached in |
+| --- | --- | --- | --- |
+| Claude Fable 5.2 / 5.1 | $10 | $50 | $0.25 |
+| Claude Opus 5.5 | $4 | $20 | $0.20 |
+| Claude Opus 4.5 / 4.6 | $5 | $25 | $0.50 |
+| Claude Opus 4.1 | $15 | $75 | $1.50 |
+| Claude Sonnet 5.5 | $2 | $10 | $0.10 |
+| Claude Sonnet 4.x | $3 | $15 | $0.30 |
+| Claude Haiku 5.5 | $0.10 | $0.50 | $0.01 |
+| Claude Haiku 4.5 | $1 | $5 | $0.10 |
+| GPT-5 / GPT-5 Codex | $1.25 | $10 | $0.125 |
+| GPT-5 mini | $0.25 | $2 | $0.025 |
+| Gemini 2.5 Pro | $1.25 | $10 | $0.31 |
+| Gemini 2.5 Flash | $0.30 | $2.50 | $0.075 |
+
+Prices are list prices at the time of writing and may drift; override any of them with `nanometrics.claudePricing`. The Claude tab shows the same table.
 
 ## Installation
 
@@ -135,32 +160,34 @@ See what your open project is costing you, right next to your code:
 | `nanometrics.statusBarStyle` | `full` | `compact` shortens the status bar to e.g. `12·45%` |
 | `nanometrics.claudePricing` | `{}` | Override model prices (USD per 1M tokens) for the cost estimate |
 | `nanometrics.claudeContextWarning` | `80` | Warn once per chat when its context passes this %; `0` turns it off |
-| `nanometrics.claudeDailyBudget` | `0` | Warn once a day when today's estimated spend (USD) passes this; `0` turns it off |
+| `nanometrics.claudeDailyBudget` | `0` | Cost limit: warn (with sound) once a day when today's estimated spend (USD) passes this; `0` turns it off |
+| `nanometrics.claudeDailyTokenLimit` | `0` | Token limit: warn (with sound) once a day when today's tokens pass this; `0` turns it off |
+| `nanometrics.claudeSessionCostLimit` | `0` | Warn (with sound) once per chat when its estimated cost (USD) passes this |
+| `nanometrics.claudeSessionTokenLimit` | `0` | Warn (with sound) once per chat when its tokens pass this |
+| `nanometrics.claudePlanPrice` | `0` | Your monthly plan price in USD (Pro 20, Max 100/200) to show plan-vs-API value; `0` hides it |
+| `nanometrics.claudeAlertSound` | `true` | Play a sound with limit and stuck-loop warnings (macOS, Linux, Windows) |
 | `nanometrics.notifyClaudeSession` | `true` | Notify when a new Claude Code chat starts in the workspace |
-| `nanometrics.claudeTurnNotify` | `unfocused` | Your-turn ping: `unfocused`, `always` or `off` |
-| `nanometrics.claudeTurnSound` | `false` | Play a short sound with the your-turn ping (macOS, Linux) |
 | `nanometrics.claudeLoopWarning` | `true` | Warn when a chat looks stuck in a loop |
 | `nanometrics.enable<Service>` | `false` | Monitor a background service |
 
 Process working directories and ports are read with `lsof` on macOS and `/proc` on Linux. On Windows the project monitor relies on terminals and command lines.
 
 
-## Privacy and open source
+## Privacy
 
-Nano Metrics runs entirely on your machine. **Nothing is sent anywhere**: no telemetry, no analytics, no account, no server. The extension makes no network requests at all.
+**We don't receive your data. Nothing is sent anywhere.** Nano Metrics reads everything from your own machine and shows it in your own VS Code window. No server, no account, no telemetry, no analytics, and the extension makes no network requests at all.
 
-What it reads, locally:
+What it reads, locally and read only:
 - System stats (CPU, memory, disks, network, battery, GPU) from your operating system
 - Processes, working directories and listening ports (`ps`, `lsof` on macOS, `/proc` on Linux)
 - Your workspace's `package.json` scripts and current git branch
-- Claude Code's session transcripts in `~/.claude/projects`, read only, to show what Claude is doing, tokens and estimated cost
-- The plan limits Claude Code last saved for `/usage` in `~/.claude.json`, read only. Nano Metrics never reads your login token and never asks Anthropic for anything
+- Claude Code's session transcripts in `~/.claude/projects`, to show what Claude is doing, tokens and estimated cost
+- The plan limits Claude Code last saved for `/usage` in `~/.claude.json`. Your login token is never read
+- Codex CLI and Gemini CLI chats (`~/.codex/sessions`, `~/.gemini/tmp`), for tokens and cost
 
-What it writes: nothing. It doesn't change your Claude Code settings or any of your files.
+What it writes: nothing in your project or in your AI tools' files. Links open in your browser only when you click them.
 
-Links open in your browser only when you click them: `localhost` ports, the claude.ai usage page (only if the Claude Code extension isn't installed) and GitHub. The **/usage** button hands `/usage` to Claude Code, which then checks your limits itself.
-
-The code is open source under the MIT License. Don't take our word for it: read every line on [GitHub](https://github.com/nuhmanpk/nanometrics), and build the extension from source if you prefer.
+**Every piece of code is open** at [github.com/nuhmanpk/nanometrics](https://github.com/nuhmanpk/nanometrics) under the MIT License. Don't take our word for it: read it, or build the extension from source. Full details in the [Privacy Policy](https://github.com/nuhmanpk/nanometrics/blob/main/PRIVACY.md).
 
 ## Contribution
 

@@ -713,3 +713,46 @@ button.cc-undo:hover { border-color: var(--orange); color: var(--orange); }
 .cc-tile .bar span { display: block; height: 100%; border-radius: 2px; }
 .cc-hint { margin-left: 16px; padding: 5px 8px; border-radius: 6px; font-size: 11px; color: var(--fg); background: var(--track); }
 .cc-mini.waiting .cc-hint { background: color-mix(in srgb, var(--yellow) 14%, transparent); }
+
+.cc-prices > summary { cursor: pointer; list-style: none; }
+.cc-price { display: grid; grid-template-columns: 1fr 52px 52px 56px; gap: 6px; padding: 3px 0; font-size: 11px; align-items: center; }
+.cc-price > .num { text-align: right; }
+.cc-price-head { opacity: .6; text-transform: uppercase; font-size: 10px; letter-spacing: .04em; }
+.cc-price-head > span:not(:first-child) { text-align: right; }
+
+.cc-pc { display: grid; grid-template-columns: 1fr 56px 52px; gap: 8px; align-items: center; padding: 3px 0; font-size: 11px; }
+.cc-pc-prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .85; }
+.cc-pc-bar { height: 6px; border-radius: 3px; background: var(--vscode-editorWidget-border, #2b2b30); overflow: hidden; }
+.cc-pc-bar > span { display: block; height: 100%; background: var(--blue, #6ea8ff); }
+.cc-pc.pricey .cc-pc-bar > span, .cc-pc.pricey .cc-pc-cost { background: var(--red, #ff6b6b); color: var(--red, #ff6b6b); }
+.cc-pc-cost { text-align: right; }
+.cc-pc-tip { font-size: 10.5px; margin-top: 4px; }
+.cc-plan { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; margin: 8px 0 4px; border-radius: 8px; font-size: 11.5px; background: rgba(125,125,140,.12); }
+.cc-plan.win { background: rgba(125,220,140,.14); }
+.cc-plan.win > b { color: var(--green, #7ddc8c); }
+
+.cc-live { margin: 8px 0; padding: 9px 11px; border-radius: 10px; background: rgba(125,125,140,.10); border: 1px solid transparent; }
+.cc-live.working { background: rgba(125,220,140,.08); border-color: rgba(125,220,140,.28); }
+.cc-live-head { display: flex; align-items: center; gap: 7px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; opacity: .85; }
+.cc-live-head .muted { margin-left: auto; text-transform: none; letter-spacing: 0; }
+.cc-live-now { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; font-size: 14px; font-weight: 600; }
+.cc-live-file { font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
+.cc-live-target { font-weight: 400; font-size: 12px; opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.cc-live-trail { margin-top: 8px; padding-top: 6px; border-top: 1px dashed rgba(125,125,140,.3); display: flex; flex-direction: column; gap: 3px; }
+.cc-live-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; font-size: 11.5px; align-items: baseline; }
+.cc-live-row > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.cc-live .ico { display: inline-flex; align-items: center; justify-content: center; color: var(--blue, #6ea8ff); }
+.cc-live-now .ico { color: var(--green, #7ddc8c); }
+.cc-ico { flex: none; }
+
+/* Running: only the border breathes, softly. Removed the moment the chat stops. */
+.cc-live { border: 1px solid transparent; }
+.cc-live.working { animation: cc-border 2.4s ease-in-out infinite; animation-delay: var(--ph, 0s); }
+@keyframes cc-border {
+  0%, 100% { border-color: rgba(125,220,140,.18); }
+  50% { border-color: rgba(125,220,140,.55); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-live.working { animation: none; border-color: rgba(125,220,140,.35); }
+}

@@ -11,6 +11,9 @@
     interval: 2000,
     warning: 85,
     budget: 0,
+    tokenLimit: 0,
+    planPrice: 0,
+    pricing: [],
     hasWorkspace: true,
     info: [],
     system: null,
@@ -424,6 +427,7 @@
         <span class="twisty ${open ? 'down' : ''}">${chevron}</span>
       </div>
       ${c.prompt ? `<div class="cc-prompt" title="${esc(c.prompt)}">${esc(c.prompt)}</div>` : ''}
+      ${liveWindowView(c)}
       ${now}
       ${loop}
       <div class="stats cc-stats">
@@ -438,6 +442,7 @@
         <div class="stat"><div class="v num">${c.filesTouched}</div><div class="l">Files edited</div></div>
         <div class="stat" title="Lines written and replaced by edits"><div class="v num">${lines}</div><div class="l">Lines</div></div>
       </div>
+      ${promptCostView(c)}
       ${open ? activity : ''}
       ${progress}
       ${open ? models : ''}
@@ -529,10 +534,33 @@
     const t = claudeTotals(state.claude);
     if (!t.sessions.length) {
       const empty = `<div class="empty-state"><div class="title">No active Claude Code session</div>Run <span class="mono">claude</span> in this workspace. Live tool calls, context, cost and edited files show up here.</div>`;
-      return (state.claude.week && state.claude.week.some((d) => d.cost) ? weekView(t) : '') + resourceView() + historyView() + empty;
+      return (state.claude.week && state.claude.week.some((d) => d.cost) ? weekView(t) : '') + otherAgentsView() + historyView() + empty + priceListView() + resourceView();
     }
     const aside = [t.working ? `${t.working} working` : '', t.waiting ? `${t.waiting} waiting` : ''].filter(Boolean).join(' · ') || 'idle';
-    return weekView(t) + resourceView() + agentsView(t.sessions) + section('Sessions', t.sessions.map((s, i) => claudeSession(s, i === 0)).join(''), aside) + historyView();
+    return weekView(t) + agentsView(t.sessions) + section('Sessions', t.sessions.map((s, i) => claudeSession(s, i === 0)).join(''), aside) + otherAgentsView() + historyView() + priceListView() + resourceView();
+  }
+
+  /** Codex CLI and Gemini CLI chats found on this machine, in plain words. Hidden when there are none. */
+  function otherAgentsView() {
+    const list = (state.claude && state.claude.otherAgents) || [];
+    if (!list.length) { return ''; }
+    const body = list.map((a) => {
+      const rows = a.sessions.slice(0, 4).map((x) => `<div class="cc-past">
+        <div class="proc-main"><div class="pname" title="${esc(x.title)}">${x.live ? '<span class="cc-pulse on"></span> ' : ''}${esc(x.title)}</div>
+          <div class="proc-cmd">${ago(x.updated)} · ${esc(x.model || 'unknown model')} · ${esc(x.tokensText)} tokens · ${esc(x.costText)}</div></div>
+      </div>`).join('');
+      return `<div class="card cc-history"><div class="cc-project-head"><strong>${esc(a.label)}</strong><span class="muted num" title="${API_NOTE}">Today ${esc(a.today.costText)} · ${esc(a.today.tokensText)} tokens</span></div>${rows}</div>`;
+    }).join('');
+    return section('Your other AI helpers', body, 'Codex · Gemini');
+  }
+
+  /** What each model charges: per 1M tokens in (what you send), out (what it writes) and cached (re-read for cheap). */
+  function priceListView() {
+    const rows = (state.pricing || []).map((p) =>
+      `<div class="cc-price"><span class="pname mono">${esc(p.model)}</span><span class="num">$${p.input}</span><span class="num">$${p.output}</span><span class="num">${p.cached != null ? '$' + p.cached : '—'}</span></div>`).join('');
+    if (!rows) { return ''; }
+    return `<details class="section cc-prices"><summary class="section-title"><span>Price list: what each AI costs</span><span class="aside">per 1M tokens</span></summary>
+      <div class="card"><div class="cc-price cc-price-head"><span>Model</span><span title="What you send">In</span><span title="What it writes back">Out</span><span title="Re-reading saved context">Cached</span></div>${rows}</div></details>`;
   }
 
   const API_NOTE = 'Billing amount if this usage were paid through the Anthropic API';
@@ -562,8 +590,112 @@
     return `<div class="card cc-overview">
       ${live}
       ${tokenGraph(c.tokenSplit)}
+      ${planValueView(total)}
       ${week.length ? `<div class="cc-label cc-week-label"><span>Last 7 days</span><span class="num" title="${API_NOTE}">${trend}$${total.toFixed(2)}</span></div><div class="cc-week">${bars}</div>` : ''}
     </div>`;
+  }
+
+  /** Small line icons for the live window, so steps read at a glance without emoji. */
+  const ICONS = {
+    read: '<path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/>',
+    edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+    write: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 12v6M9 15h6"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+    files: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    web: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+    plan: '<path d="m3 6 2 2 4-4M3 14l2 2 4-4M13 7h8M13 15h8"/>',
+    helper: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14.5a6.5 6.5 0 0 1 3 5.5"/>',
+    test: '<path d="M9 3h6M10 3v6l-5.5 9.5A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-2.5L14 9V3"/>',
+    build: '<path d="m15 12-8.4 8.4a2.1 2.1 0 0 1-3-3L12 9M17.6 15 21 11.6a3 3 0 0 0-1-5l-1.5-.5L17 4.5 14 7.5l2 2z"/>',
+    lint: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/>',
+    git: '<circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 7.5v9M18 10.5c0 4-6 3-12 6"/>',
+    pkg: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+    look: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    script: '<path d="M8 5v14l11-7z"/>',
+    term: '<path d="m4 17 6-5-6-5M12 19h8"/>',
+    dot: '<circle cx="12" cy="12" r="3"/>'
+  };
+  const icon = (name) => `<svg class="cc-ico" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ICONS.dot}</svg>`;
+
+  /** Turns a raw tool call into a plain sentence plus the file or thing it touches. */
+  function humanStep(st) {
+    const d = st.detail || '';
+    const file = d && /\.[A-Za-z0-9]{1,8}$/.test(d) && !/\s/.test(d) ? d : '';
+    switch (st.tool) {
+      case 'Read': return { icon: 'read', text: 'Reading', target: d, file: d };
+      case 'Edit': case 'MultiEdit': return { icon: 'edit', text: 'Editing', target: d, file: d };
+      case 'Write': return { icon: 'write', text: 'Writing a new file', target: d, file: d };
+      case 'NotebookEdit': return { icon: 'edit', text: 'Editing notebook', target: d, file: d };
+      case 'Grep': return { icon: 'search', text: 'Searching the code for', target: d };
+      case 'Glob': return { icon: 'files', text: 'Finding files matching', target: d };
+      case 'WebSearch': return { icon: 'web', text: 'Searching the web for', target: d };
+      case 'WebFetch': return { icon: 'web', text: 'Reading a web page', target: d };
+      case 'TodoWrite': return { icon: 'plan', text: 'Planning the next steps', target: '' };
+      case 'Task': case 'Agent': return { icon: 'helper', text: 'Handing work to a helper', target: d };
+      case 'Bash': {
+        const c = d.toLowerCase();
+        if (/\b(test|jest|vitest|mocha|pytest)\b/.test(c)) { return { icon: 'test', text: 'Running the tests', target: '' }; }
+        if (/\b(build|compile|tsc|webpack|vite build)\b/.test(c)) { return { icon: 'build', text: 'Building the project', target: '' }; }
+        if (/\blint|eslint|prettier\b/.test(c)) { return { icon: 'lint', text: 'Checking code style', target: '' }; }
+        if (/\bgit\b/.test(c)) { return { icon: 'git', text: 'Working with git', target: '' }; }
+        if (/\b(npm|yarn|pnpm|pip|brew|cargo) (install|add|i)\b/.test(c)) { return { icon: 'pkg', text: 'Installing packages', target: '' }; }
+        if (/^(sed|cat|head|tail|ls|find|grep|rg|wc)\b/.test(c)) { return { icon: 'look', text: 'Looking through files', target: '' }; }
+        if (/^(python3?|node|ruby|go run)\b/.test(c)) { return { icon: 'script', text: 'Running a script', target: '' }; }
+        return { icon: 'term', text: 'Running a command', target: d };
+      }
+      default: return { icon: 'dot', text: st.tool, target: d, file };
+    }
+  }
+
+  /** A simple live window: what Claude is doing now, on what, and the last few moves in plain words. Hidden when there is nothing yet. */
+  function liveWindowView(c) {
+    const steps = (c.steps || []).slice(0, 5);
+    if (!steps.length) { return ''; }
+    const working = c.state === 'working';
+    const [cur, ...rest] = steps.map((st) => ({ ...humanStep(st), time: st.time, cat: st.cat }));
+    // Steps only carry a file name; the open handler wants the full path, which hot files know.
+    const full = (name) => { const f = (c.hotFiles || []).find((x) => x.name === name); return f ? f.path : ''; };
+    const target = (h) => {
+      if (!h.target) { return ''; }
+      const path = h.file ? full(h.file) : '';
+      return path
+        ? `<button class="chip script cc-live-file" data-action="openFile" data-path="${esc(path)}" title="Open ${esc(path)}">${esc(h.target)}</button>`
+        : `<span class="cc-live-target">${esc(h.target)}</span>`;
+    };
+    const mapping = rest.length ? `<div class="cc-live-trail">${rest.map((h) => `<div class="cc-live-row"><span class="ico">${icon(h.icon)}</span><span>${esc(h.text)} ${h.target ? `<span class="muted">${esc(h.target)}</span>` : ''}</span><span class="muted num">${ago(h.time)}</span></div>`).join('')}</div>` : '';
+    // The panel is re-rendered on every refresh; a wall-clock phase keeps the glow continuous instead of restarting.
+    const phase = `style="--ph:-${((Date.now() % 2400) / 1000).toFixed(2)}s"`;
+    return `<div class="cc-live ${working ? 'working' : ''}" ${working ? phase : ''}>
+      <div class="cc-live-head"><span class="cc-pulse ${working ? 'on' : ''}"></span><span class="cc-live-label">${working ? 'Right now' : 'Last thing it did'}</span><span class="muted num">${ago(cur.time)}</span></div>
+      <div class="cc-live-now"><span class="ico">${icon(cur.icon)}</span><span>${esc(cur.text)}</span>${target(cur)}</div>
+      ${mapping}
+    </div>`;
+  }
+
+  /** What each recent prompt cost, so it is clear which asks are expensive. */
+  function promptCostView(c) {
+    const list = c.promptCosts || [];
+    if (!list.length) { return ''; }
+    const top = Math.max(0.001, ...list.map((p) => p.cost));
+    const last = list[0];
+    const rows = list.map((p) => `<div class="cc-pc ${p.pricey ? 'pricey' : ''}" title="${esc(p.prompt)}">
+      <span class="cc-pc-prompt">› ${esc(p.prompt)}</span>
+      <span class="cc-pc-bar"><span style="width:${Math.max(3, (p.cost / top) * 100)}%"></span></span>
+      <span class="num cc-pc-cost">${esc(p.costText)}</span></div>`).join('');
+    const tip = list.some((p) => p.pricey)
+      ? '<div class="muted cc-pc-tip">Red ones cost much more than your usual prompt. Smaller, more specific asks are cheaper.</div>' : '';
+    return `<div><div class="cc-label"><span>Cost per prompt</span><span class="num" title="${esc(last.prompt)}">Last: ${esc(last.costText)}</span></div><div class="cc-steps">${rows}</div>${tip}</div>`;
+  }
+
+  /** Last 7 days at API prices against the plan the user pays, pro-rated. Hidden until a plan price is set. */
+  function planValueView(total) {
+    if (!state.planPrice || total < 0.01) { return ''; }
+    const share = state.planPrice * 7 / 30;
+    const times = total / share;
+    const win = total >= share;
+    return `<div class="cc-plan ${win ? 'win' : ''}" data-tip="${esc(`Last 7 days at API prices: $${total.toFixed(2)}\nYour $${state.planPrice}/mo plan, pro-rated for 7 days: $${share.toFixed(2)}`)}">
+      <b>${win ? `Plan saved you $${(total - share).toFixed(2)}` : `Using ${Math.round(times * 100)}% of your plan's worth`}</b>
+      <span class="muted">API would be $${total.toFixed(2)} vs $${share.toFixed(2)} for 7 days of your $${state.planPrice} plan${win ? ` · ${times.toFixed(1)}× value` : ''}</span></div>`;
   }
 
   /** Subagents running right now across the live chats: what each one is and which tool it is using. Hidden when none run. */
@@ -683,7 +815,7 @@
     const tile = (value, label, tip, extra = '') => `<span class="cc-tile" data-tip="${esc(tip)}"><b class="num">${value}</b><span>${label}</span>${extra}</span>`;
     const spentToday = c && c.today
       ? tile(`<span class="${overBudget() ? 'cc-over' : ''}">${esc(c.today.cost)}</span>`, 'Spent today',
-        `What today's Claude Code use in this project would cost at API prices.${state.budget ? `\nYour daily budget: $${state.budget.toFixed(2)}` : ''}\nOn a Pro or Max plan you pay the plan price, not this.`)
+        `What today's Claude Code use in this project would cost at API prices.${state.budget ? `\nYour daily cost limit: $${state.budget.toFixed(2)}` : ''}${state.tokenLimit ? `\nYour daily token limit: ${count(state.tokenLimit)}` : ''}\nOn a Pro or Max plan you pay the plan price, not this.`)
       : '';
     const ctxPct = s && s.context ? Math.round(s.context.percent) : null;
     const memory = ctxPct != null
@@ -1043,6 +1175,9 @@
         state.interval = m.interval || 2000;
         state.warning = m.warning;
         state.budget = m.budget || 0;
+        state.tokenLimit = m.tokenLimit || 0;
+        state.planPrice = m.planPrice || 0;
+        state.pricing = m.pricing || [];
         state.info = m.info;
         state.hasWorkspace = m.hasWorkspace;
         if (!compact && m.force) {

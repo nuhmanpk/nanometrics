@@ -7,6 +7,7 @@ import {
   UsageBucket, UsageTracker
 } from './claudeUsage';
 import type { ClaudeLimits } from './claudeLimits';
+import type { OtherAgentSummary } from './otherAgents';
 
 export interface ClaudeTodo {
   content: string;
@@ -109,6 +110,16 @@ export interface ClaudeTurn {
   files: string[];
 }
 
+export interface ClaudePromptCost {
+  prompt: string;
+  time: number;
+  cost: number;
+  costText: string;
+  tokens: string;
+  // Well above this chat's typical prompt: worth asking smaller next time.
+  pricey: boolean;
+}
+
 export interface ClaudeLoop {
   // What looks stuck, e.g. `Bash · npm test failed 4× in a row`, and a stable key so it is reported once.
   text: string;
@@ -133,6 +144,7 @@ export interface ClaudeSession {
   steps: ClaudeStep[];
   todos: ClaudeTodo[];
   toolCalls: number;
+  tokenCount: number;
   failedCalls: number;
   filesTouched: number;
   linesAdded: number;
@@ -161,6 +173,8 @@ export interface ClaudeSession {
   agents: ClaudeAgent[];
   // Recent prompts that changed files, newest first; each one can be undone.
   turns: ClaudeTurn[];
+  // What each recent prompt cost, with Claude's whole answer and its subagents, newest first.
+  promptCosts: ClaudePromptCost[];
   loop: ClaudeLoop | null;
 }
 
@@ -170,7 +184,9 @@ export interface ClaudeSnapshot {
   // Older sessions from the last week, newest first, and spend per day for the last seven days (oldest first).
   history: ClaudePastSession[];
   week: ClaudeDay[];
-  today: { tokens: string; cost: string; costUsd: number; sessions: number };
+  today: { tokens: string; tokenCount: number; cost: string; costUsd: number; sessions: number };
+  // Codex CLI and Gemini CLI sessions found on this machine, filled in by the dashboard.
+  otherAgents?: OtherAgentSummary[];
   // Tokens per minute across the workspace over the last hour, oldest first.
   tokenRate: number[];
   // The same hour split into new tokens and cache reads, with estimated cost per minute.
@@ -314,7 +330,7 @@ export async function transcriptFiles(cwd: string, id: string): Promise<string[]
   return [main, ...(await agentFiles(path.join(dir, id))).map(f => f.file)];
 }
 
-function projectDir(folder: string): string {
+export function projectDir(folder: string): string {
   // Claude Code stores transcripts under the folder path with every non-alphanumeric character as '-'.
   return path.join(os.homedir(), '.claude', 'projects', folder.replace(/[^a-zA-Z0-9]/g, '-'));
 }
@@ -461,6 +477,8 @@ interface Parsed {
   // Tool calls still without a result, oldest first, and whether the last thing written was Claude's reply.
   pending: string[];
   replied: boolean;
+  // The turn is over: Claude's final answer landed, or the user interrupted it. Stops the "working" state at once.
+  ended: boolean;
   research: ClaudeResearch[];
   errors: ClaudeError[];
   turns: ClaudeTurn[];
@@ -544,6 +562,7 @@ function parse(text: string, mtime: number): Parsed {
   let context = 0;
   const contextSeries: [number, number][] = [];
   let replied = false;
+  let ended = false;
 
   for (const line of text.split('\n')) {
     if (!line) {
@@ -561,6 +580,7 @@ function parse(text: string, mtime: number): Parsed {
       lastPrompt = row.lastPrompt;
     } else if (row.type === 'assistant' && Array.isArray(row.message?.content)) {
       model = row.message.model || model;
+      ended = row.message.stop_reason === 'end_turn' || row.message.stop_reason === 'max_tokens';
       const time = Date.parse(row.timestamp) || mtime;
       first ||= time;
       const u = parseUsage(row.message.usage);
@@ -579,6 +599,7 @@ function parse(text: string, mtime: number): Parsed {
           continue;
         }
         replied = false;
+        ended = false;
         toolCalls++;
         const input = part.input ?? {};
         if (part.id) {
@@ -626,8 +647,16 @@ function parse(text: string, mtime: number): Parsed {
           }
         }
       }
+      // Esc in Claude Code: the run stops right there, whatever was still in flight.
+      const interrupted = JSON.stringify(content ?? '').includes('[Request interrupted');
+      if (interrupted) {
+        pending.clear();
+      }
+      // A tool result means the turn goes on; a prompt or an interrupt means it is over or restarting.
+      ended = interrupted;
       const typed = promptText(content);
       if (typed) {
+        ended = false;
         lastPrompt = typed;
         if (row.uuid) {
           turns.push({ id: String(row.uuid), prompt: short(typed, 100), time: time || mtime, files: [] });
@@ -640,7 +669,7 @@ function parse(text: string, mtime: number): Parsed {
   return {
     steps, files, todos, title, lastPrompt, model, toolCalls, failed, added, removed, first, context,
     contextSeries: contextSeries.slice(-MAX_CONTEXT_POINTS),
-    pending: [...pending.values()], replied, research, errors, turns, results
+    pending: [...pending.values()], replied, ended, research, errors, turns, results
   };
 }
 
@@ -778,11 +807,13 @@ async function readSession(name: string, folder: string, cwd: string, main: Agen
   let updated = main.mtime;
 
   const agents: ClaudeAgent[] = [];
+  const subTrackers: UsageTracker[] = [];
   for (const sub of subs) {
     try {
       const [p, subTracker, meta] = await Promise.all([
         parsedTail(sub), readUsage(sub.file, sub.size, pricing), readMeta(sub.file)
       ]);
+      subTrackers.push(subTracker);
       addUsage(usage, subTracker.usage);
       if (subTracker.totalCost !== null) {
         cost = (cost ?? 0) + subTracker.totalCost;
@@ -829,7 +860,7 @@ async function readSession(name: string, folder: string, cwd: string, main: Agen
 
   // An agent call stays open while the agent runs, so only other tools count as blocking.
   const blocking = own.pending.filter(t => !AGENT_TOOLS.has(t));
-  const quiet = now - updated >= WORKING_MS;
+  const quiet = now - updated >= WORKING_MS || (own.ended && blocking.length === 0);
   const waitingOn = !quiet ? '' : blocking.length ? blocking[blocking.length - 1] : own.replied ? 'you' : '';
 
   const started = Math.min(...[main.born, own.first, updated].filter((t): t is number => !!t && t > 0));
@@ -878,15 +909,37 @@ async function readSession(name: string, folder: string, cwd: string, main: Agen
     cacheHit: prompted ? (usage.cacheRead / prompted) * 100 : null,
     cacheSaved: formatCost(saved),
     tokens: formatTokens(totalTokens(usage)),
+    tokenCount: totalTokens(usage),
     tokenDetail: usageText({ usage }),
     cost: formatCost(cost),
     costUsd: cost,
     burnRate,
     agents,
     turns: own.turns.filter(t => t.files.length).slice(-MAX_TURNS).reverse(),
+    promptCosts: promptCosts(own.turns, [tracker, ...subTrackers], now),
     // Only worth raising while the session is still going.
     loop: now - updated < RECENT_MS ? detectLoop(own.results) : null
   };
+}
+
+const MAX_PROMPT_COSTS = 6;
+
+/** Prices each prompt as everything spent from it until the next prompt, subagents included. */
+export function promptCosts(turns: { prompt: string; time: number }[], trackers: UsageTracker[], now: number): ClaudePromptCost[] {
+  const rows = turns.map((t, i) => {
+    const end = i + 1 < turns.length ? turns[i + 1].time : now + 1;
+    const spend = trackers.reduce((a, tr) => {
+      const x = tr.spendBetween(t.time, end);
+      return { cost: a.cost + x.cost, tokens: a.tokens + x.tokens };
+    }, { cost: 0, tokens: 0 });
+    return { prompt: t.prompt, time: t.time, cost: spend.cost, costText: formatCost(spend.cost), tokens: formatTokens(spend.tokens), pricey: false };
+  }).filter(r => r.cost > 0);
+  const sorted = rows.map(r => r.cost).sort((a, b) => a - b);
+  const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+  for (const r of rows) {
+    r.pricey = rows.length >= 3 && r.cost >= 0.25 && r.cost >= 2.5 * median;
+  }
+  return rows.slice(-MAX_PROMPT_COSTS).reverse();
 }
 
 interface PastMeta {
@@ -1044,7 +1097,7 @@ export async function collectClaude(folders: string[], pricing: PriceTable = DEF
     sessions,
     history: history.slice(0, MAX_HISTORY),
     week,
-    today: { tokens: formatTokens(t.tokens), cost: formatCost(t.cost), costUsd: t.cost, sessions: todaySessions },
+    today: { tokens: formatTokens(t.tokens), tokenCount: t.tokens, cost: formatCost(t.cost), costUsd: t.cost, sessions: todaySessions },
     tokenRate,
     tokenSplit,
     prevWeek: fortnight.slice(0, 7).reduce((a, d) => ({ tokens: a.tokens + d.tokens, cost: a.cost + d.cost }), { tokens: 0, cost: 0 }),

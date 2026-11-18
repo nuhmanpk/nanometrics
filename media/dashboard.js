@@ -5,6 +5,7 @@
   const saved = vscode.getState() || {};
 
   const state = {
+    sound: saved.sound !== false,
     tab: saved.tab || 'system',
     paused: false,
     showGraph: true,
@@ -427,7 +428,6 @@
         <span class="twisty ${open ? 'down' : ''}">${chevron}</span>
       </div>
       ${c.prompt ? `<div class="cc-prompt" title="${esc(c.prompt)}">${esc(c.prompt)}</div>` : ''}
-      ${liveWindowView(c)}
       ${now}
       ${loop}
       <div class="stats cc-stats">
@@ -474,18 +474,6 @@
 
   const overBudget = () => !!(state.budget > 0 && state.claude && state.claude.today && state.claude.today.costUsd > state.budget);
 
-  function limitsView() {
-    const l = state.claude && state.claude.limits;
-    const link = '<button class="chip script" data-action="checkUsage" title="Open Claude Code with /usage filled in, to refresh these numbers">/usage</button>';
-    // Read from Claude Code's internal cache; when that isn't there or changed shape, leave the section out.
-    if (!limitsUseful(l)) { return ''; }
-    const rows = l.limits.map((x) => `<div title="${esc(x.label)}: ${Math.round(x.percent)}% used">
-        <div class="row-head"><span class="label">${esc(x.label)}</span><span class="muted num">${Math.round(x.percent)}% · ${esc(resetText(x.resetsAt))}</span></div>
-        <div class="bar"><div style="width:${Math.min(100, x.percent)}%;background:${limitColor(x.percent)}"></div></div>
-      </div>`).join('');
-    return section('Plan usage', `<div class="card rows cc-limits">${rows}<div class="cc-limits-actions"><span class="muted">Updated ${ago(l.updated)}</span>${link}</div></div>`);
-  }
-
   function claudeTotals(c) {
     const sessions = c ? c.sessions : [];
     const costs = sessions.map((s) => s.costUsd).filter((v) => v != null);
@@ -499,8 +487,42 @@
     };
   }
 
+  // Blocks of the Claude tab can be dragged into any order; the order is remembered.
+  const CLAUDE_ORDER = ['now', 'project', 'week', 'agents', 'sessions', 'others', 'history', 'prices', 'load'];
+  let claudeOrder = Array.isArray(saved.claudeOrder) ? saved.claudeOrder.filter((k) => CLAUDE_ORDER.includes(k)) : [];
+  for (const k of CLAUDE_ORDER) { if (!claudeOrder.includes(k)) { claudeOrder.push(k); } }
+  let dragging = false;
+
   function claudeView() {
-    return limitsView() + projectTotalsView() + claudeSessions();
+    const b = Object.assign({ project: projectTotalsView() }, claudeBlocks());
+    const grip = '<span class="grip" draggable="true" title="Drag to rearrange" aria-label="Drag to rearrange">⋮⋮</span>';
+    const blocks = claudeOrder.filter((k) => b[k]);
+    // A single message (no folder, still loading) has nothing to reorder.
+    return blocks.map((k) => `<div class="blk" data-blk="${k}">${grip}${b[k]}</div>`).join('') + (b.misc || '');
+  }
+
+  const modelLabel = (id) => {
+    const m = /(opus|sonnet|haiku|fable)[-_ ]?(\d+)?(?:[-_.](\d+))?/i.exec(id);
+    return m ? `${m[1][0].toUpperCase()}${m[1].slice(1).toLowerCase()}${m[2] ? ` ${m[2]}${m[3] && m[3].length < 3 ? `.${m[3]}` : ''}` : ''}` : id;
+  };
+
+  /** Token parts, models used and thinking, for the project card. */
+  function projectDetail(p) {
+    if (!p.parts) { return ''; }
+    const stat = (v, l, tip) => `<div class="stat"${tip ? ` title="${esc(tip)}"` : ''}><div class="v num">${v}</div><div class="l">${l}</div></div>`;
+    const think = p.thinkingTokens ? `~${count(p.thinkingTokens)}` : count(p.thinkingTurns);
+    const grid = `<div class="stats cc-pstats">
+      ${stat(count(p.parts.input), 'Input', 'Fresh tokens you sent')}
+      ${stat(count(p.parts.output), 'Output', 'Tokens written back, thinking included')}
+      ${stat(count(p.parts.cacheRead), 'Cache read', 'Saved context re-read cheaply')}
+      ${stat(count(p.parts.cacheWrite), 'Cache write')}
+      ${stat(think, p.thinkingTokens ? 'Thinking tokens (est.)' : 'Thinking turns', 'Claude Code does not log reasoning tokens separately: they are inside Output. This counts the times it stopped to think.')}
+      ${stat(count(p.subagents), 'Subagent runs')}
+    </div>`;
+    const top = Math.max(1, ...p.models.map((m) => m.tokens));
+    const models = p.models.map((m) => `<div class="cc-model" title="${esc(m.name)}"><span class="label">${esc(modelLabel(m.name))}</span><span class="bar"><div style="width:${Math.max(3, (m.tokens / top) * 100)}%;background:var(--blue)"></div></span><span class="muted num">${count(m.tokens)}${m.cost != null ? ` · $${m.cost.toFixed(2)}` : ''}</span></div>`).join('');
+    const saved = p.cacheSaved && p.cacheSaved !== '—' ? `<div class="muted cc-pc-tip">Prompt caching saved about ${esc(p.cacheSaved)}.</div>` : '';
+    return `${grid}${models ? `<div class="cc-label"><span>Models</span></div>${models}` : ''}${saved}`;
   }
 
   /** What Claude Code has spent on this project, over every chat it kept. */
@@ -523,21 +545,29 @@
         <div class="stat"><div class="v num">${count(p.toolCalls)}</div><div class="l">Tool calls</div></div>
       </div>
       ${p.toolCalls ? `<div class="mixbar">${segs}</div><div class="cc-mixes">${mix}</div>` : ''}
+      ${projectDetail(p)}
     </div>`;
   }
 
-  function claudeSessions() {
+  function claudeBlocks() {
     if (!state.hasWorkspace) {
-      return `<div class="empty-state"><div class="title">No folder open</div>Open the folder you run Claude Code in to follow its sessions here.</div>`;
+      return { misc: `<div class="empty-state"><div class="title">No folder open</div>Open the folder you run Claude Code in to follow its sessions here.</div>` };
     }
-    if (!state.claude) { return '<div class="skeleton" style="height:120px"></div>'; }
+    if (!state.claude) { return { misc: '<div class="skeleton" style="height:120px"></div>' }; }
     const t = claudeTotals(state.claude);
+    const out = { others: otherAgentsView(), history: historyView(), prices: priceListView(), load: resourceView() };
     if (!t.sessions.length) {
-      const empty = `<div class="empty-state"><div class="title">No active Claude Code session</div>Run <span class="mono">claude</span> in this workspace. Live tool calls, context, cost and edited files show up here.</div>`;
-      return (state.claude.week && state.claude.week.some((d) => d.cost) ? weekView(t) : '') + otherAgentsView() + historyView() + empty + priceListView() + resourceView();
+      out.week = state.claude.week && state.claude.week.some((d) => d.cost) ? weekView(t) : '';
+      out.sessions = `<div class="empty-state"><div class="title">No active Claude Code session</div>Run <span class="mono">claude</span> in this workspace. Live tool calls, context, cost and edited files show up here.</div>`;
+      return out;
     }
     const aside = [t.working ? `${t.working} working` : '', t.waiting ? `${t.waiting} waiting` : ''].filter(Boolean).join(' · ') || 'idle';
-    return weekView(t) + agentsView(t.sessions) + section('Sessions', t.sessions.map((s, i) => claudeSession(s, i === 0)).join(''), aside) + otherAgentsView() + historyView() + priceListView() + resourceView();
+    const live = t.sessions.map(liveWindowView).filter(Boolean);
+    out.now = live.length ? section('Currently happening', live.join(''), t.working ? `${t.working} working` : 'idle') : '';
+    out.week = weekView(t);
+    out.agents = agentsView(t.sessions);
+    out.sessions = section('Sessions', t.sessions.map((s, i) => claudeSession(s, i === 0)).join(''), aside);
+    return out;
   }
 
   /** Codex CLI and Gemini CLI chats found on this machine, in plain words. Hidden when there are none. */
@@ -568,17 +598,23 @@
   /** Today at a glance, and spend per day over the last week. */
   function weekView(t) {
     const c = state.claude;
-    const week = c.week || [];
+    const week7 = c.week || [];
+    // Show as many days as the width allows (about 40px each), 7 at minimum, up to everything the host sent.
+    const all = c.days && c.days.length ? c.days : week7;
+    const fit = Math.max(7, Math.floor((app.clientWidth - 24) / 40));
+    const week = all.slice(-Math.min(all.length, fit));
+    const many = week.length > 7;
     const top = Math.max(0.01, ...week.map((d) => d.cost));
     const total = week.reduce((n, d) => n + d.cost, 0);
+    const total7 = week7.reduce((n, d) => n + d.cost, 0);
     const avg = total / Math.max(1, week.length);
     const prev = c.prevWeek && c.prevWeek.cost;
-    const delta = prev >= 0.01 ? Math.round(((total - prev) / prev) * 100) : null;
+    const delta = prev >= 0.01 ? Math.round(((total7 - prev) / prev) * 100) : null;
     const trend = delta == null ? '' : `<span class="trend ${delta > 0 ? 'up' : 'down'}" data-tip="${esc(`Previous 7 days: $${prev.toFixed(2)}`)}">${delta > 0 ? '▲' : '▼'} ${Math.abs(delta)}%</span>`;
     const bars = week.map((d) => `<div class="cc-day ${d.label === 'Today' ? 'today' : ''}" data-tip="${esc(`${d.label} · $${d.cost.toFixed(2)} · ${count(d.tokens)} tokens${avg >= 0.01 ? `\n${d.cost >= avg ? `${(d.cost / avg).toFixed(1)}× ` : ''}${d.cost >= avg ? 'the' : 'below the'} daily average of $${avg.toFixed(2)}` : ''}`)}">
         <span class="cc-day-cost num">${d.cost >= 0.01 ? `$${d.cost < 10 ? d.cost.toFixed(2) : Math.round(d.cost)}` : ''}</span>
         <span class="cc-day-bar"><span style="height:${Math.max(d.cost ? 4 : 0, (d.cost / top) * 100)}%"></span></span>
-        <span class="cc-day-label">${esc(d.label)}</span>
+        <span class="cc-day-label">${esc(d.label)}${many && d.label !== 'Today' ? `<br>${Number(d.day.slice(-2))}` : ''}</span>
       </div>`).join('');
     const live = t.sessions.length
       ? `<div class="stats">
@@ -590,8 +626,8 @@
     return `<div class="card cc-overview">
       ${live}
       ${tokenGraph(c.tokenSplit)}
-      ${planValueView(total)}
-      ${week.length ? `<div class="cc-label cc-week-label"><span>Last 7 days</span><span class="num" title="${API_NOTE}">${trend}$${total.toFixed(2)}</span></div><div class="cc-week">${bars}</div>` : ''}
+      ${planValueView(total7)}
+      ${week.length ? `<div class="cc-label cc-week-label"><span>Last ${week.length} days</span><span class="num" title="${API_NOTE}">${trend}$${total.toFixed(2)}</span></div><div class="cc-week" style="grid-template-columns:repeat(${week.length},1fr)">${bars}</div>` : ''}
     </div>`;
   }
 
@@ -605,6 +641,7 @@
     web: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
     plan: '<path d="m3 6 2 2 4-4M3 14l2 2 4-4M13 7h8M13 15h8"/>',
     helper: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14.5a6.5 6.5 0 0 1 3 5.5"/>',
+    deploy: '<path d="M12 2c3 2 5 6 5 10l-2 3H9l-2-3c0-4 2-8 5-10z"/><circle cx="12" cy="9" r="1.5"/><path d="M9 15l-2 4M15 15l2 4"/>',
     test: '<path d="M9 3h6M10 3v6l-5.5 9.5A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-2.5L14 9V3"/>',
     build: '<path d="m15 12-8.4 8.4a2.1 2.1 0 0 1-3-3L12 9M17.6 15 21 11.6a3 3 0 0 0-1-5l-1.5-.5L17 4.5 14 7.5l2 2z"/>',
     lint: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/>',
@@ -634,6 +671,7 @@
       case 'Task': case 'Agent': return { icon: 'helper', text: 'Handing work to a helper', target: d };
       case 'Bash': {
         const c = d.toLowerCase();
+        if (/\b(deploy|vercel|netlify|wrangler|firebase|vsce publish|npm publish|git push|docker push|kubectl|fly launch|heroku)\b/.test(c)) { return { icon: 'deploy', text: 'Deploying', target: '' }; }
         if (/\b(test|jest|vitest|mocha|pytest)\b/.test(c)) { return { icon: 'test', text: 'Running the tests', target: '' }; }
         if (/\b(build|compile|tsc|webpack|vite build)\b/.test(c)) { return { icon: 'build', text: 'Building the project', target: '' }; }
         if (/\blint|eslint|prettier\b/.test(c)) { return { icon: 'lint', text: 'Checking code style', target: '' }; }
@@ -646,6 +684,18 @@
       default: return { icon: 'dot', text: st.tool, target: d, file };
     }
   }
+
+  /** One plain sentence for what Claude is doing, keyed by the step icon. */
+  const PLAIN = {
+    read: 'reading code', look: 'reading code', files: 'looking for files', search: 'searching the code',
+    edit: 'writing code', write: 'writing code', web: 'searching the web', plan: 'making a plan',
+    helper: 'asking a helper to do a task', test: 'running tests', build: 'building the project', lint: 'checking code style',
+    git: 'saving changes with git', pkg: 'installing packages', script: 'running a script', term: 'running a command',
+    deploy: 'deploying'
+  };
+  const plainStatus = (c, icon) => c.state === 'working'
+    ? `Claude is ${PLAIN[icon] || 'working'}`
+    : c.state === 'waiting' ? 'Claude is waiting for you' : 'Claude is resting';
 
   /** A simple live window: what Claude is doing now, on what, and the last few moves in plain words. Hidden when there is nothing yet. */
   function liveWindowView(c) {
@@ -667,6 +717,7 @@
     const phase = `style="--ph:-${((Date.now() % 2400) / 1000).toFixed(2)}s"`;
     return `<div class="cc-live ${working ? 'working' : ''}" ${working ? phase : ''}>
       <div class="cc-live-head"><span class="cc-pulse ${working ? 'on' : ''}"></span><span class="cc-live-label">${working ? 'Right now' : 'Last thing it did'}</span><span class="muted num">${ago(cur.time)}</span></div>
+      <div class="cc-live-plain">${esc(plainStatus(c, cur.icon))}</div>
       <div class="cc-live-now"><span class="ico">${icon(cur.icon)}</span><span>${esc(cur.text)}</span>${target(cur)}</div>
       ${mapping}
     </div>`;
@@ -999,6 +1050,9 @@
     return rows.join('');
   }
 
+  const BELL_ON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
+  const BELL_OFF = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="M2 2l20 20"/></svg>';
+
   // ---------- footer links ----------
   const GITHUB_ICON = '<svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
   const HEART_ICON = '<svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M4.25 2.5c-1.336 0-2.75 1.164-2.75 3 0 2.15 1.58 4.144 3.365 5.682A20.565 20.565 0 008 13.393a20.561 20.561 0 003.135-2.211C12.92 9.644 14.5 7.65 14.5 5.5c0-1.836-1.414-3-2.75-3-1.373 0-2.609.986-3.029 2.456a.75.75 0 01-1.442 0C6.859 3.486 5.623 2.5 4.25 2.5zM8 14.25l-.345.666-.002-.001-.006-.003-.018-.01a7.643 7.643 0 01-.31-.17 22.075 22.075 0 01-3.434-2.414C2.045 10.731 0 8.35 0 5.5 0 2.836 2.086 1 4.25 1 5.797 1 7.153 1.802 8 3.02 8.847 1.802 10.203 1 11.75 1 13.914 1 16 2.836 16 5.5c0 2.85-2.045 5.231-3.885 6.818a22.08 22.08 0 01-3.744 2.584l-.018.01-.006.003h-.002L8 14.25zm0 0l.345.666a.752.752 0 01-.69 0L8 14.25z"/></svg>';
@@ -1070,7 +1124,50 @@
   document.addEventListener('mouseleave', () => { pointer = null; updateTip(); });
   window.addEventListener('scroll', () => { pointer = null; updateTip(); }, true);
 
+  // ---------- ping ----------
+  // A short, quiet two-note chime when Claude finishes or needs you. Off with the bell in the top bar.
+  let audio = null;
+  function ping() {
+    if (!state.sound || document.visibilityState !== 'visible') { return; }
+    try {
+      audio = audio || new AudioContext();
+      if (audio.state === 'suspended') { audio.resume(); }
+      const t0 = audio.currentTime;
+      [880, 1175].forEach((f, i) => {
+        const o = audio.createOscillator();
+        const g = audio.createGain();
+        o.type = 'sine';
+        o.frequency.value = f;
+        const t = t0 + i * 0.13;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.06, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+        o.connect(g).connect(audio.destination);
+        o.start(t);
+        o.stop(t + 0.25);
+      });
+    } catch { /* audio unavailable */ }
+  }
+
+  /** Ping when a session that was working stops (finished) or starts waiting on the user. */
+  const lastStates = new Map();
+  function pingOnChange(claude) {
+    let should = false;
+    const now = new Map();
+    for (const s of (claude && claude.sessions) || []) {
+      now.set(s.id, s.state);
+      const was = lastStates.get(s.id);
+      if (was && was !== s.state && (was === 'working' || s.state === 'waiting') && s.state !== 'working') { should = true; }
+    }
+    lastStates.clear();
+    now.forEach((v, k) => lastStates.set(k, v));
+    if (should) { ping(); }
+  }
+
+  window.addEventListener('resize', () => render());
+
   function render() {
+    if (dragging) { return; }
     renderRegions();
     if (pointer) { updateTip(); }
   }
@@ -1086,6 +1183,7 @@
         <button class="tab ${state.tab === 'project' ? 'active' : ''}" role="tab" aria-selected="${state.tab === 'project'}" data-action="tab" data-tab="project">Project</button>
         <button class="tab ${state.tab === 'claude' ? 'active' : ''}" role="tab" aria-selected="${state.tab === 'claude'}" data-action="tab" data-tab="claude">Claude${claudeBadge()}</button>
       </div>
+      <button class="bell ${state.sound ? 'on' : ''}" data-action="sound" title="${state.sound ? 'Ping is on: a soft sound when Claude finishes or needs you. Click to turn off' : 'Ping is off. Click to turn on'}" aria-pressed="${state.sound}" aria-label="Toggle ping sound">${state.sound ? BELL_ON : BELL_OFF}</button>
       <button class="live ${state.paused ? 'paused' : ''}" data-action="pause" title="${state.paused ? 'Resume' : 'Pause'} monitoring"><span class="dot"></span>${state.paused ? 'Paused' : 'Live'}</button>
     </div>${state.error ? `<div class="error">${esc(state.error)}</div>` : ''}`);
     region('system', systemView()).hidden = state.tab !== 'system';
@@ -1095,8 +1193,37 @@
   }
 
   function persist() {
-    vscode.setState({ tab: state.tab, expanded: [...state.expanded], showIdle: [...state.showIdle], procSort: state.procSort });
+    vscode.setState({ tab: state.tab, expanded: [...state.expanded], showIdle: [...state.showIdle], procSort: state.procSort, claudeOrder, sound: state.sound });
   }
+
+  app.addEventListener('dragstart', (e) => {
+    const g = /** @type {HTMLElement} */ (e.target);
+    const blk = g.closest && g.closest('.blk');
+    if (!blk || !g.classList.contains('grip')) { return; }
+    dragging = true;
+    blk.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', /** @type {HTMLElement} */ (blk).dataset.blk);
+    e.dataTransfer.setDragImage(blk, 10, 10);
+  });
+  app.addEventListener('dragover', (e) => {
+    if (!dragging) { return; }
+    const over = /** @type {HTMLElement} */ (e.target).closest('.blk');
+    const cur = app.querySelector('.blk.dragging');
+    if (!over || !cur || over === cur) { e.preventDefault(); return; }
+    e.preventDefault();
+    const r = over.getBoundingClientRect();
+    over.parentNode.insertBefore(cur, e.clientY < r.top + r.height / 2 ? over : over.nextSibling);
+  });
+  app.addEventListener('dragend', () => {
+    if (!dragging) { return; }
+    dragging = false;
+    const keys = [...app.querySelectorAll('.blk')].map((n) => /** @type {HTMLElement} */ (n).dataset.blk);
+    claudeOrder = [...keys, ...claudeOrder.filter((k) => !keys.includes(k))];
+    persist();
+    delete regions.claude.__html;
+    render();
+  });
 
   app.addEventListener('click', (e) => {
     const target = /** @type {HTMLElement} */ (e.target);
@@ -1138,6 +1265,12 @@
       case 'runScript':
         vscode.postMessage({ type: 'runScript', folder: d.folder, script: d.script });
         return;
+      case 'sound':
+        state.sound = !state.sound;
+        persist();
+        if (state.sound) { ping(); }
+        render();
+        break;
       case 'checkUsage':
         vscode.postMessage({ type: 'checkUsage' });
         return;
@@ -1206,6 +1339,7 @@
         state.error = '';
         break;
       case 'claude':
+        pingOnChange(m.data);
         state.claude = m.data;
         if (m.history) { state.history = m.history; }
         break;

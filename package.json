@@ -1,10 +1,10 @@
 {
   "name": "nanometrics",
   "displayName": "Nano Metrics: Claude Code Usage, Cost & System Monitor",
-  "icon": "media/activity.svg",
+  "icon": "images/logo.png",
   "publisher": "nuhmanpk",
   "description": "Track Claude Code live in the sidebar: tokens, cost, context window, plan usage limits, tool calls and subagents. Plus CPU, memory, network, ports and dev processes for your project.",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "license": "SEE LICENSE IN LICENSE",
   "homepage": "https://github.com/nuhmanpk/nanometrics#readme",
   "bugs": {
@@ -415,8 +415,9 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "package": "vsce package",
+    "package": "node scripts/marketplace-readme.js && vsce package --readme-path README.marketplace.md",
     "compile": "tsc -p ./",
+    "bench": "tsc -p ./ && node --expose-gc scripts/bench.js",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",

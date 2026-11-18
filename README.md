@@ -35,6 +35,14 @@
   </a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/nuhmanpk/nanometrics/raw/main/images/nanometrics-intro.mp4">
+    <img src="https://raw.githubusercontent.com/nuhmanpk/nanometrics/main/images/nanometrics-intro-poster.png" alt="Watch the 40-second intro to Nano Metrics" width="720">
+  </a>
+  <br><sub>▶ 40-second intro: what Nano Metrics is and why you'd want it</sub>
+</p>
+
+
 
 ----
 
@@ -63,6 +71,7 @@ Works with the Claude Code CLI and the Claude Code VS Code extension. Runs fully
 
 Watch your AI pair programmer work, without leaving the sidebar. The **Claude** tab follows every recent Claude Code session in your workspace:
 - **Live status** - Working, **Your turn** (Claude finished and waits for your prompt), **Waiting on a tool** (a permission prompt or a long run) or Idle. The tab shows a dot when a session needs you, so you notice from any tab
+- **Currently happening** - its own section at the top: one plain sentence like *Claude is writing code*, *Claude is searching the web*, *Claude is running tests* or *Claude is deploying*, then the last few moves. Made for anyone, no jargon
 - **What it's doing right now** - the current tool call, and the last prompt you sent
 - **Context meter** - how full the context window was on the latest request
 - **Tokens, cost and burn rate** - total tokens, the estimated cost (what the usage would be billed through the Anthropic API) and $/hr. Override prices with `nanometrics.claudePricing`
@@ -75,8 +84,8 @@ Watch your AI pair programmer work, without leaving the sidebar. The **Claude** 
 - **Models and cache** - tokens and cost per model when you switch models, plus the cache hit rate and how much caching saved
 - **Errors** - failed tool calls with their error message
 - **Token graph** - tokens per minute over the last hour, across every session in the workspace
-- **Last 7 days** - estimated spend per day in this workspace, and today's total
-- **Project totals** - estimated cost, tokens and tool calls across every chat in this project, with the mix of tool kinds
+- **Daily spend** - estimated spend per day in this workspace, and today's total. Widen the panel and it shows more days (up to 60), not just the last 7
+- **Project analytics** - every chat in this project: number of chats, estimated cost, total tokens and tool calls, the mix of tool kinds, input / output / cache tokens, thinking turns, subagent runs, the models used (tokens and cost each) and what prompt caching saved
 - **Chats** - the last week's chats with their context fill, tool calls and cost; **Resume** opens a terminal with `claude --resume`
 - **Claude Code load** - CPU and memory of the running `claude` processes against total system usage, and tokens per minute
 - **Checkpoints and undo** - every recent prompt that changed files, with one-click **Undo** that restores those files to how they were before it (asks first, lists every file)
@@ -87,7 +96,9 @@ Watch your AI pair programmer work, without leaving the sidebar. The **Claude** 
 - **Alerts** - a heads-up when a new chat starts, when a chat's context passes 80%, or when a chat looks stuck. No "Claude is done" popups
 - **Other AI helpers** - Codex CLI and Gemini CLI chats found on your machine, with tokens and cost per chat and today's total
 - **Price list** - a built-in table of what each model charges per 1M tokens in, out and cached (Claude Fable, Opus, Sonnet, Haiku, plus GPT and Gemini), and `nanometrics.claudePricing` to override it
-- **Plan usage** - your Claude plan's 5-hour and weekly limits as bars, with the time each one resets: the same numbers as `/usage` in Claude Code, read from Claude Code's local cache. No setup. The **/usage** button opens Claude Code with `/usage` filled in to refresh them. Hidden when there is nothing to show
+- **Ping** - a soft, short chime when a chat finishes or needs you. Turn it off with the bell in the top bar
+- **Drag to rearrange** - grab the ⋮⋮ handle on any block of the Claude tab and drop it where you want; the order is remembered
+- **Plan usage** - your Claude plan's 5-hour limit in the Explorer panel's **LIM** row, read from Claude Code's local cache (hover for the weekly limits and reset times)
 - A **CC** row in the Explorer panel and a summary card on the Project tab show what Claude is doing at a glance
 
 It reads Claude Code's local session transcripts (`~/.claude/projects`). Nothing is uploaded.

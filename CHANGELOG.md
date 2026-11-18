@@ -4,6 +4,19 @@ All notable changes to the "nanometrics" extension will be documented in this fi
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.8.0]
+
+- **Intro video** in the README: a 40-second tour of what Nano Metrics does
+- **Claude** tab
+  - **Currently happening**: a new section at the top that says what Claude is doing in plain words (*Claude is writing code*, *searching the web*, *running tests*, *deploying*…), with the last few moves under it
+  - **Drag to rearrange**: every block of the Claude tab has a ⋮⋮ handle; drop it anywhere and the order is remembered
+  - **Ping**: a soft two-note chime when a chat finishes or starts waiting on you. Toggle it with the new bell in the top bar
+  - **Project analytics**: input, output and cache tokens, thinking turns, subagent runs, models used with tokens and cost, and what caching saved
+  - **Daily spend** grows with the panel width: up to 60 days instead of a fixed 7
+  - **Plan usage** section removed from the Claude tab (the 5-hour limit still shows in the Explorer panel's LIM row)
+- **Performance**: the network sample no longer spawns system commands every refresh (the interface and IP are looked up every 30 s), cutting the System tab's CPU cost about 3×. `npm run bench` measures each refresh path
+- README screenshots are now real renders of the dashboard (`scripts/screenshots.js`)
+
 ## [0.7.0]
 
 - **Token and cost limits**: `claudeDailyTokenLimit`, `claudeDailyBudget`, `claudeSessionCostLimit`, `claudeSessionTokenLimit`; each warns once and plays a sound (`claudeAlertSound`)

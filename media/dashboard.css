@@ -756,3 +756,17 @@ button.cc-undo:hover { border-color: var(--orange); color: var(--orange); }
 @media (prefers-reduced-motion: reduce) {
   .cc-live.working { animation: none; border-color: rgba(125,220,140,.35); }
 }
+
+.blk { position: relative; }
+.blk .grip { position: absolute; top: 0; right: 0; z-index: 2; padding: 0 4px; cursor: grab; opacity: 0; color: var(--muted); font-size: 12px; line-height: 16px; letter-spacing: -2px; user-select: none; transition: opacity .15s; }
+.blk:hover > .grip, .blk .grip:focus-visible { opacity: .8; }
+.blk.dragging { opacity: .45; }
+
+.cc-pstats { margin-top: 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 12px; }
+.cc-pstats .v { font-size: 15px; }
+
+.cc-live-plain { font-size: 14px; font-weight: 600; margin: 6px 0 2px; }
+
+.bell { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 4px; margin-left: auto; border-radius: 4px; display: inline-flex; }
+.bell.on { color: var(--fg); }
+.bell:hover { background: var(--card-hover); }

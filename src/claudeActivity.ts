@@ -72,6 +72,14 @@ export interface ClaudeProjectTotals {
   cost: string;
   toolCalls: number;
   toolMix: Record<ToolCategory, number>;
+  // Token parts over every transcript, usage per model, and how often Claude stopped to think.
+  parts: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  models: { name: string; tokens: number; cost: number | null }[];
+  thinkingTurns: number;
+  // Rough (about 4 characters per token); 0 when the transcript keeps no thinking text.
+  thinkingTokens: number;
+  cacheSaved: string;
+  subagents: number;
 }
 
 export interface ClaudeDay {
@@ -184,6 +192,8 @@ export interface ClaudeSnapshot {
   // Older sessions from the last week, newest first, and spend per day for the last seven days (oldest first).
   history: ClaudePastSession[];
   week: ClaudeDay[];
+  // Spend per day for up to the last HISTORY_DAYS days (oldest first); the dashboard shows as many as fit.
+  days: ClaudeDay[];
   today: { tokens: string; tokenCount: number; cost: string; costUsd: number; sessions: number };
   // Codex CLI and Gemini CLI sessions found on this machine, filled in by the dashboard.
   otherAgents?: OtherAgentSummary[];
@@ -258,6 +268,7 @@ const RECENT_MS = 30 * 60_000;
 // Sessions untouched this long are left out of the history and the week chart.
 const WEEK_MS = 7 * 24 * 60 * 60_000;
 const MAX_HISTORY = 10;
+const HISTORY_DAYS = 60;
 const MAX_RESEARCH = 12;
 const MAX_ERRORS = 5;
 const RATE_MIN = 60;
@@ -391,6 +402,7 @@ interface FileUsage {
   tracker: UsageTracker;
   // Tool calls per category over the whole transcript; each tool_use block is written once.
   tools: Record<ToolCategory, number>;
+  thinking: { turns: number; chars: number };
 }
 
 // Usage has to cover the whole transcript, not just the tail, so each file is read once and then only its new bytes.
@@ -399,6 +411,16 @@ const CHUNK_BYTES = 4 * 1024 * 1024;
 
 async function readUsage(file: string, size: number, pricing: PriceTable): Promise<UsageTracker> {
   return (await readFileUsage(file, size, pricing)).tracker;
+}
+
+function countThinking(row: any, into: { turns: number; chars: number }) {
+  const content = row?.type === 'assistant' ? row.message?.content : null;
+  for (const part of Array.isArray(content) ? content : []) {
+    if (part?.type === 'thinking') {
+      into.turns++;
+      into.chars += typeof part.thinking === 'string' ? part.thinking.length : 0;
+    }
+  }
 }
 
 function countTools(row: any, into: Record<ToolCategory, number>) {
@@ -413,7 +435,7 @@ function countTools(row: any, into: Record<ToolCategory, number>) {
 async function readFileUsage(file: string, size: number, pricing: PriceTable): Promise<FileUsage> {
   let entry = usageCache.get(file);
   if (!entry || size < entry.offset) {
-    entry = { offset: 0, tracker: new UsageTracker(pricing), tools: emptyMix() };
+    entry = { offset: 0, tracker: new UsageTracker(pricing), tools: emptyMix(), thinking: { turns: 0, chars: 0 } };
     usageCache.set(file, entry);
   }
   entry.tracker.setPricing(pricing);
@@ -446,6 +468,7 @@ async function readFileUsage(file: string, size: number, pricing: PriceTable): P
           const row = JSON.parse(line);
           entry.tracker.ingest(row);
           countTools(row, entry.tools);
+          countThinking(row, entry.thinking);
         } catch {
           // Partial or corrupt line.
         }
@@ -976,8 +999,8 @@ export async function collectClaude(folders: string[], pricing: PriceTable = DEF
   const history: ClaudePastSession[] = [];
   const now = Date.now();
   // Fourteen days are tallied so this week can be compared with the one before.
-  const fortnight = lastDays(14, now);
-  const week = fortnight.slice(7);
+  const fortnight = lastDays(HISTORY_DAYS, now);
+  const week = fortnight.slice(-7);
   const byDay = new Map(fortnight.map(d => [d.day, d]));
   const today = week[week.length - 1].day;
   let todaySessions = 0;
@@ -987,6 +1010,11 @@ export async function collectClaude(folders: string[], pricing: PriceTable = DEF
   const projectMix = emptyMix();
   let projectCost: number | null = null;
   let projectSessions = 0;
+  let thinkingTurns = 0;
+  let thinkingChars = 0;
+  let cacheSaved = 0;
+  let subagents = 0;
+  const projectModels = new Map<string, { tokens: number; cost: number | null }>();
   let since = 0;
 
   for (const folder of folders) {
@@ -1027,6 +1055,16 @@ export async function collectClaude(folders: string[], pricing: PriceTable = DEF
         let cost: number | null = null;
         for (const e of entries) {
           addUsage(projectUsage, e.tracker.usage);
+          thinkingTurns += e.thinking.turns;
+          thinkingChars += e.thinking.chars;
+          cacheSaved += e.tracker.saved;
+          e.tracker.byModel.forEach((b, name) => {
+            if (!name || b.tokens <= 0) { return; }
+            const m = projectModels.get(name) ?? { tokens: 0, cost: null };
+            m.tokens += b.tokens;
+            m.cost = b.cost > 0 || m.cost !== null ? (m.cost ?? 0) + b.cost : m.cost;
+            projectModels.set(name, m);
+          });
           if (e.tracker.totalCost !== null) {
             projectCost = (projectCost ?? 0) + e.tracker.totalCost;
           }
@@ -1036,6 +1074,7 @@ export async function collectClaude(folders: string[], pricing: PriceTable = DEF
           }
         }
         projectSessions++;
+        subagents += s.subs.length;
         const born = s.main.born && s.main.born > 0 ? s.main.born : s.main.mtime;
         since = since ? Math.min(since, born) : born;
         if (now - s.mtime > 2 * WEEK_MS) {
@@ -1097,10 +1136,11 @@ export async function collectClaude(folders: string[], pricing: PriceTable = DEF
     sessions,
     history: history.slice(0, MAX_HISTORY),
     week,
+    days: fortnight,
     today: { tokens: formatTokens(t.tokens), tokenCount: t.tokens, cost: formatCost(t.cost), costUsd: t.cost, sessions: todaySessions },
     tokenRate,
     tokenSplit,
-    prevWeek: fortnight.slice(0, 7).reduce((a, d) => ({ tokens: a.tokens + d.tokens, cost: a.cost + d.cost }), { tokens: 0, cost: 0 }),
+    prevWeek: fortnight.slice(-14, -7).reduce((a, d) => ({ tokens: a.tokens + d.tokens, cost: a.cost + d.cost }), { tokens: 0, cost: 0 }),
     project: {
       sessions: projectSessions,
       since,
@@ -1108,7 +1148,13 @@ export async function collectClaude(folders: string[], pricing: PriceTable = DEF
       tokenDetail: usageText({ usage: projectUsage }),
       cost: formatCost(projectCost),
       toolCalls: Object.values(projectMix).reduce((a, b) => a + b, 0),
-      toolMix: projectMix
+      toolMix: projectMix,
+      parts: { input: projectUsage.input, output: projectUsage.output, cacheRead: projectUsage.cacheRead, cacheWrite: projectUsage.cacheWrite5m + projectUsage.cacheWrite1h },
+      models: [...projectModels].map(([name, m]) => ({ name, tokens: m.tokens, cost: m.cost })).sort((a, b) => b.tokens - a.tokens).slice(0, 6),
+      thinkingTurns,
+      thinkingTokens: Math.round(thinkingChars / 4),
+      cacheSaved: formatCost(cacheSaved > 0 ? cacheSaved : null),
+      subagents
     }
   };
 }

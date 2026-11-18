@@ -167,15 +167,22 @@ async function cpuInfo() {
   return cpuInfoCache;
 }
 
+// The default interface and its address rarely change, but looking them up spawns processes: refresh them slowly.
+const NET_TTL = 30_000;
+let netCache: { at: number; iface: string; ip4: string } | undefined;
+
 async function networkInfo(): Promise<SystemSnapshot['network']> {
-  const iface = await si.networkInterfaceDefault();
-  const [stats, ifaces] = await Promise.all([si.networkStats(iface), si.networkInterfaces()]);
-  const list = Array.isArray(ifaces) ? ifaces : [ifaces];
-  const info = list.find(i => i.iface === iface);
+  if (!netCache || Date.now() - netCache.at > NET_TTL) {
+    const iface = await si.networkInterfaceDefault();
+    const ifaces = await si.networkInterfaces();
+    const list = Array.isArray(ifaces) ? ifaces : [ifaces];
+    netCache = { at: Date.now(), iface, ip4: list.find(i => i.iface === iface)?.ip4 ?? '' };
+  }
+  const stats = await si.networkStats(netCache.iface);
   const s = stats[0];
   return {
-    iface,
-    ip4: info?.ip4 ?? '',
+    iface: netCache.iface,
+    ip4: netCache.ip4,
     rxSec: Math.max(0, s?.rx_sec ?? 0),
     txSec: Math.max(0, s?.tx_sec ?? 0)
   };

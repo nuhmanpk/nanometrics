@@ -11,3 +11,7 @@ vsc-extension-quickstart.md
 **/.vscode-test.*
 out/test/**
 *.zip
+scripts/**
+README.md
+images/*.mp4
+images/*-poster.png
